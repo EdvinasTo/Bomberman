@@ -1,0 +1,19 @@
+# C# / .NET
+bin/
+obj/
+.vs/
+*.user
+*.suo
+
+# Java / IDEs
+*.class
+target/
+.idea/
+*.iml
+.settings/
+.classpath
+.project
+
+# OS Files
+.DS_Store
+Thumbs.db
