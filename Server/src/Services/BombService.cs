@@ -1,61 +1,157 @@
+
 using System.Collections.Concurrent;
-using Microsoft.AspNetCore.SignalR;
 using Bomberman.Server.src.Controllers;
 using Bomberman.Server.src.Interfaces;
-using System.Threading.Tasks;
+using Bomberman.Server.src.Patterns.Singleton;
+using Microsoft.AspNetCore.SignalR;
 
-namespace Bomberman.Server.src.Services
+namespace Bomberman.Server.src.Services;
+
+public sealed class BombService : IBombService
 {
-    public class BombService : IBombService
-    {
-        private readonly ConcurrentDictionary<string, bool> _activeBombs = new();
-        private readonly IPlayerService _playerService;
-        private readonly IHubContext<GameHub> _hubContext;
+    private readonly IHubContext<GameHub> _hubContext;
+    private readonly IPlayerService _playerService;
+    private readonly GameManager _gameManager = GameManager.Instance;
+    private readonly ConcurrentDictionary<string, byte> _runningBombs = new();
 
-        public BombService(IPlayerService playerService, IHubContext<GameHub> hubContext)
+    private const int BombDelayMs = 3000;
+    private const int ExplosionDurationMs = 500;
+    private const int BlastRadius = 60;
+    private const int EntitySize = 30;
+
+    public BombService(
+        IHubContext<GameHub> hubContext,
+        IPlayerService playerService)
+    {
+        _hubContext = hubContext;
+        _playerService = playerService;
+    }
+
+    public async Task TryPlaceBombAsync(string connectionId)
+    {
+        if (string.IsNullOrWhiteSpace(connectionId))
+            return;
+
+        if (!_gameManager.TryStartPlayerBomb(connectionId))
+            return;
+
+        if (!_runningBombs.TryAdd(connectionId, 0))
         {
-            _playerService = playerService;
-            _hubContext = hubContext;
+            _gameManager.FinishPlayerBomb(connectionId);
+            return;
         }
 
-        public async Task TryPlaceBombAsync(string connectionId)
+        try
         {
-            // Prevent placing multiple bombs simultaneously
-            if (_activeBombs.TryGetValue(connectionId, out bool active) && active)
+            var position = _playerService.GetPosition(connectionId);
+
+            // Explosion coordinates use the centre of the player/bomb.
+            int bombX = position.X + EntitySize / 2;
+            int bombY = position.Y + EntitySize / 2;
+
+            await _hubContext.Clients.All.SendAsync(
+                "BombPlaced", connectionId, position.X, position.Y);
+
+            // Movement remains available while this asynchronous timer runs.
+            await Task.Delay(BombDelayMs);
+
+            await _hubContext.Clients.All.SendAsync(
+                "Exploded", connectionId, bombX, bombY, BlastRadius);
+
+            // Damage players in the explosion.
+            foreach (var player in _playerService.GetAllPositions())
             {
-                return;
+                int health = _playerService.ApplyExplosionDamage(
+                    player.Key, bombX, bombY, BlastRadius);
+
+                await _hubContext.Clients.Client(player.Key)
+                    .SendAsync("PlayerHealth", health);
+
+                if (health <= 0)
+                {
+                    await _hubContext.Clients.Client(player.Key)
+                        .SendAsync("PlayerDied");
+                }
             }
 
-            var position = _playerService.GetPosition(connectionId);
-            _activeBombs[connectionId] = true;
-
-            // 1. Broadcast immediately that bomb was placed
-            await _hubContext.Clients.All.SendAsync("BombPlaced", position.X, position.Y);
-
-            // 2. Offload lifecycle timer to background task
-            _ = Task.Run(async () =>
+            // Damage each enemy once per explosion.
+            foreach (var pair in _gameManager.GetEnemies())
             {
-                try
-                {
-                    // 3 seconds fuse
-                    await Task.Delay(3000);
-                    await _hubContext.Clients.All.SendAsync("Exploded", position.X, position.Y);
+                var enemy = pair.Value;
 
-                    // 0.5 seconds explosion duration
-                    await Task.Delay(500);
-                    _activeBombs[connectionId] = false;
-                    await _hubContext.Clients.All.SendAsync("ExplosionFinished", position.X, position.Y);
-                }
-                catch (Exception ex)
+                if (!IsEnemyHit(
+                        enemy.Position.X,
+                        enemy.Position.Y,
+                        bombX,
+                        bombY,
+                        BlastRadius))
                 {
-                    Console.WriteLine($"Error during bomb timer execution: {ex.Message}");
+                    continue;
                 }
-            });
+
+                enemy.TakeDamage(1);
+
+                if (enemy.IsDead)
+                {
+                    _gameManager.RemoveEnemy(pair.Key);
+
+                    await _hubContext.Clients.All.SendAsync(
+                        "EnemyHealth", pair.Key, 0);
+
+                    await _hubContext.Clients.All.SendAsync(
+                        "EnemyRemoved", pair.Key);
+                }
+                else
+                {
+                    await _hubContext.Clients.All.SendAsync(
+                        "EnemyHealth", pair.Key, enemy.Health);
+                }
+            }
+
+            // Remove destructible blocks hit by the blast.
+            foreach (var block in _gameManager.DestroyBlocksInBlast(
+                         bombX, bombY, BlastRadius))
+            {
+                await _hubContext.Clients.All.SendAsync(
+                    "BlockDestroyed", block.X, block.Y);
+            }
+
+            await Task.Delay(ExplosionDurationMs);
+
+            await _hubContext.Clients.All.SendAsync(
+                "ExplosionFinished", connectionId, bombX, bombY);
         }
-
-        public void RemovePlayerBomb(string connectionId)
+        finally
         {
-            _activeBombs.TryRemove(connectionId, out _);
+            _runningBombs.TryRemove(connectionId, out _);
+            _gameManager.FinishPlayerBomb(connectionId);
         }
+    }
+
+    private static bool IsEnemyHit(
+        int enemyX,
+        int enemyY,
+        int bombX,
+        int bombY,
+        int radius)
+    {
+        int enemyCenterX = enemyX + EntitySize / 2;
+        int enemyCenterY = enemyY + EntitySize / 2;
+
+        bool horizontalHit =
+            Math.Abs(enemyCenterY - bombY) <= EntitySize / 2 &&
+            Math.Abs(enemyCenterX - bombX) <= radius + EntitySize / 2;
+
+        bool verticalHit =
+            Math.Abs(enemyCenterX - bombX) <= EntitySize / 2 &&
+            Math.Abs(enemyCenterY - bombY) <= radius + EntitySize / 2;
+
+        return horizontalHit || verticalHit;
+    }
+
+    public void RemovePlayerBomb(string connectionId)
+    {
+        _runningBombs.TryRemove(connectionId, out _);
+        _gameManager.FinishPlayerBomb(connectionId);
     }
 }

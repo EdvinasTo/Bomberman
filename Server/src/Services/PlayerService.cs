@@ -1,34 +1,40 @@
-using System;
-using System.Collections.Concurrent;
-using Bomberman.Server.src.Models;
 using Bomberman.Server.src.Interfaces;
+using Bomberman.Server.src.Models;
+using Bomberman.Server.src.Patterns.Singleton;
+using Bomberman.Server.Blocks.Damage;
 
-namespace Bomberman.Server.src.Services
+namespace Bomberman.Server.src.Services;
+
+/// <summary>Player-specific operations delegated to the authoritative GameManager state.</summary>
+public sealed class PlayerService : IPlayerService
 {
-    public class PlayerService : IPlayerService
-    {
-        private readonly ConcurrentDictionary<string, PlayerPosition> _positions = new();
+    private readonly GameManager _gameManager = GameManager.Instance;
 
-        public PlayerPosition UpdatePosition(string connectionId, int x, int y)
-        {
-            int clampedX = Math.Clamp(x, 0, 610);
-            int clampedY = Math.Clamp(y, 0, 450);
-            var pos = new PlayerPosition(clampedX, clampedY);
+    public PlayerPosition UpdatePosition(string connectionId, int x, int y) =>
+        _gameManager.UpdatePlayerPosition(connectionId, x, y);
 
-            _positions[connectionId] = pos;
-            return pos;
-        }
+    public PlayerPosition GetPosition(string connectionId) =>
+        _gameManager.GetPlayerPosition(connectionId);
 
-        public PlayerPosition GetPosition(string connectionId)
-        {
-            return _positions.TryGetValue(connectionId, out var pos)
-                ? pos
-                : new PlayerPosition(100, 100);
-        }
+    public IReadOnlyCollection<KeyValuePair<string, PlayerPosition>> GetAllPositions() =>
+        _gameManager.GetAllPlayerPositions();
 
-        public void RemovePlayer(string connectionId)
-        {
-            _positions.TryRemove(connectionId, out _);
-        }
-    }
+    public int GetPlayerHealth(string connectionId) =>
+        _gameManager.GetPlayerHealth(connectionId);
+
+    public int ApplyExplosionDamage(string connectionId, int bombX, int bombY, int radius) =>
+        _gameManager.ApplyExplosionDamage(connectionId, bombX, bombY, radius);
+
+    public int ApplyDamage(string connectionId, int damage) =>
+        _gameManager.ApplyPlayerDamage(connectionId, damage);
+
+    public void RemovePlayer(string connectionId) =>
+        _gameManager.RemovePlayer(connectionId);
+
+    public int ApplyDamage(
+    string connectionId,
+    int damage,
+    IDamageSystem damageSystem) =>
+    _gameManager.ApplyPlayerDamage(
+        connectionId, damage, damageSystem);
 }
