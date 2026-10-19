@@ -26,15 +26,36 @@ public class NetworkManager {
     }
 
     private void registerHandlers() {
+        // Local player.
         hub.on("Position", (Integer x, Integer y) -> {
             gameState.setPlayerPosition(x, y);
             notifyUI();
         }, Integer.class, Integer.class);
 
         hub.on("PlayerHealth", (Integer health) -> {
-    gameState.setPlayerHealth(health);
-    notifyUI();
-}, Integer.class);
+            gameState.setPlayerHealth(health);
+            notifyUI();
+        }, Integer.class);
+
+        // Other players.
+        hub.on("OtherPlayerSpawned",
+                (String playerId, Integer x, Integer y) -> {
+                    gameState.updateOtherPlayer(playerId, x, y);
+                    notifyUI();
+                },
+                String.class, Integer.class, Integer.class);
+
+        hub.on("OtherPlayerPosition",
+                (String playerId, Integer x, Integer y) -> {
+                    gameState.updateOtherPlayer(playerId, x, y);
+                    notifyUI();
+                },
+                String.class, Integer.class, Integer.class);
+
+        hub.on("PlayerLeft", (String playerId) -> {
+            gameState.removeOtherPlayer(playerId);
+            notifyUI();
+        }, String.class);
 
         hub.on("PlayerDied", () ->
                 SwingUtilities.invokeLater(() ->
@@ -45,34 +66,39 @@ public class NetworkManager {
                 )
         );
 
+        // Bombs.
         hub.on("BombPlaced", (String ownerId, Integer x, Integer y) -> {
             gameState.addBomb(x, y, 60, ownerId);
             notifyUI();
         }, String.class, Integer.class, Integer.class);
 
-        hub.on("Exploded", (
-                String ownerId, Integer x, Integer y, Integer radius) -> {
-            gameState.removeBomb(x, y);
-            gameState.addExplosion(x, y, radius);
-            notifyUI();
-        }, String.class, Integer.class, Integer.class, Integer.class);
+        hub.on("Exploded",
+                (String ownerId, Integer x, Integer y, Integer radius) -> {
+                    gameState.removeBomb(x, y);
+                    gameState.addExplosion(x, y, radius);
+                    notifyUI();
+                },
+                String.class, Integer.class, Integer.class, Integer.class);
 
-        hub.on("ExplosionFinished", (
-                String ownerId, Integer x, Integer y) -> {
-            gameState.removeExplosion(x, y, 60);
-            notifyUI();
-        }, String.class, Integer.class, Integer.class);
+        hub.on("ExplosionFinished",
+                (String ownerId, Integer x, Integer y) -> {
+                    gameState.removeExplosion(x, y, 60);
+                    notifyUI();
+                },
+                String.class, Integer.class, Integer.class);
 
+        // Enemies.
         hub.on("EnemyPosition", (String id, Integer x, Integer y) -> {
             gameState.updateEnemyPosition(id, x, y);
             notifyUI();
         }, String.class, Integer.class, Integer.class);
 
-        hub.on("EnemySpawned", (
-                String id, Integer x, Integer y, Integer health) -> {
-            gameState.updateEnemy(id, x, y, health);
-            notifyUI();
-        }, String.class, Integer.class, Integer.class, Integer.class);
+        hub.on("EnemySpawned",
+                (String id, Integer x, Integer y, Integer health) -> {
+                    gameState.updateEnemy(id, x, y, health);
+                    notifyUI();
+                },
+                String.class, Integer.class, Integer.class, Integer.class);
 
         hub.on("EnemyHealth", (String id, Integer health) -> {
             gameState.updateEnemyHealth(id, health);
@@ -84,6 +110,7 @@ public class NetworkManager {
             notifyUI();
         }, String.class);
 
+        // Blocks.
         hub.on("BlockDestroyed", (Integer x, Integer y) -> {
             gameState.removeBlock(x, y);
             notifyUI();
@@ -104,8 +131,10 @@ public class NetworkManager {
                 hub.start().blockingAwait();
                 ready = true;
 
-                sendMove(gameState.getPlayerX(), gameState.getPlayerY());
-
+                sendMove(
+                        gameState.getPlayerX(),
+                        gameState.getPlayerY()
+                );
             } catch (Exception e) {
                 e.printStackTrace();
 

@@ -1,5 +1,7 @@
+
 package bomberman.model;
 
+import java.awt.Point;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -10,6 +12,9 @@ public class GameState {
     private int playerX = 100;
     private int playerY = 100;
     private volatile int playerHealth = 3;
+
+    private final Map<String, Point> otherPlayers =
+            new ConcurrentHashMap<>();
 
     private final List<Bomb> bombs =
             Collections.synchronizedList(new ArrayList<>());
@@ -35,11 +40,11 @@ public class GameState {
             blocks.put(key(600, y), new BlockView(600, y, false));
         }
 
-        // Internal indestructible obstacle; matches the server map.
-blocks.put(
-    key(300, 180),
-    new BlockView(300, 180, false)
-);
+        // Internal indestructible obstacle.
+        blocks.put(
+                key(300, 180),
+                new BlockView(300, 180, false)
+        );
 
         // Destructible blocks.
         int[][] positions = {
@@ -58,7 +63,6 @@ blocks.put(
                     new BlockView(position[0], position[1], true)
             );
         }
-
     }
 
     private static String key(int x, int y) {
@@ -82,16 +86,35 @@ blocks.put(
     }
 
     public int getPlayerHealth() {
-    return playerHealth;
-}
+        return playerHealth;
+    }
 
-public void setPlayerHealth(int health) {
-    playerHealth = Math.max(0, Math.min(3, health));
-}
+    public void setPlayerHealth(int health) {
+        playerHealth = Math.max(0, Math.min(3, health));
+    }
 
     public synchronized void setPlayerPosition(int x, int y) {
         playerX = x;
         playerY = y;
+    }
+
+    // Remote player state.
+    public Map<String, Point> getOtherPlayers() {
+        return otherPlayers;
+    }
+
+    public void updateOtherPlayer(String id, int x, int y) {
+        if (id == null || id.isBlank()) {
+            return;
+        }
+
+        otherPlayers.put(id, new Point(x, y));
+    }
+
+    public void removeOtherPlayer(String id) {
+        if (id != null) {
+            otherPlayers.remove(id);
+        }
     }
 
     public List<Bomb> getBombs() {
@@ -102,33 +125,39 @@ public void setPlayerHealth(int health) {
         bombs.add(new Bomb(x, y, radius, ownerId));
     }
 
-    
-public void removeBomb(int x, int y) {
-    synchronized (bombs) {
-        bombs.removeIf(bomb ->
-                bomb.isAt(x, y)
-                || bomb.isAt(x - 15, y - 15));
+    public void removeBomb(int x, int y) {
+        synchronized (bombs) {
+            bombs.removeIf(bomb ->
+                    bomb.isAt(x, y)
+                    || bomb.isAt(x - 15, y - 15));
+        }
     }
-}
-
 
     public List<Explosion> getExplosions() {
         return explosions;
     }
 
     public void addExplosion(int x, int y, int radius) {
-        // Render a continuous cross made of 30px cells; radius is shared with server.
+        // Render a cross using 30px cells.
         int step = 30;
+
         for (int offset = -radius; offset <= radius; offset += step) {
             explosions.add(new Explosion(x + offset, y));
-            if (offset != 0) explosions.add(new Explosion(x, y + offset));
+
+            if (offset != 0) {
+                explosions.add(new Explosion(x, y + offset));
+            }
         }
     }
 
     public void removeExplosion(int x, int y, int radius) {
-        explosions.removeIf(explosion ->
-                (explosion.getY() == y && Math.abs(explosion.getX() - x) <= radius)
-                || (explosion.getX() == x && Math.abs(explosion.getY() - y) <= radius));
+        synchronized (explosions) {
+            explosions.removeIf(explosion ->
+                    (explosion.getY() == y
+                            && Math.abs(explosion.getX() - x) <= radius)
+                    || (explosion.getX() == x
+                            && Math.abs(explosion.getY() - y) <= radius));
+        }
     }
 
     public Map<String, EnemyView> getEnemies() {

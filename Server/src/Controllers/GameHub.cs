@@ -24,22 +24,31 @@ public sealed class GameHub : Hub
 
     public async Task Move(int x, int y)
     {
-        var position = _playerService.UpdatePosition(
-            Context.ConnectionId, x, y);
+        var playerId = Context.ConnectionId;
 
+        var position = _playerService.UpdatePosition(playerId, x, y);
+
+        // Update the player who moved.
         await Clients.Caller.SendAsync(
             "Position", position.X, position.Y);
 
+        // Update every other connected player.
+        await Clients.Others.SendAsync(
+            "OtherPlayerPosition",
+            playerId,
+            position.X,
+            position.Y);
+
         await Clients.Caller.SendAsync(
             "PlayerHealth",
-            _playerService.GetPlayerHealth(Context.ConnectionId));
+            _playerService.GetPlayerHealth(playerId));
     }
 
     public Task PlaceBomb()
     {
         string connectionId = Context.ConnectionId;
 
-        // Do not await the 3-second bomb countdown inside this hub invocation.
+        // Do not wait for the bomb countdown inside this hub invocation.
         _ = RunBombSafelyAsync(connectionId);
 
         return Task.CompletedTask;
@@ -54,22 +63,46 @@ public sealed class GameHub : Hub
         catch (Exception ex)
         {
             _logger.LogError(
-                ex, "Failed to process bomb for connection {ConnectionId}",
+                ex,
+                "Failed to process bomb for connection {ConnectionId}",
                 connectionId);
         }
     }
 
     public override async Task OnConnectedAsync()
     {
-        var position = _playerService.GetPosition(Context.ConnectionId);
+        var playerId = Context.ConnectionId;
+        var position = _playerService.GetPosition(playerId);
 
+        // Send the new player their own initial state.
         await Clients.Caller.SendAsync(
             "Position", position.X, position.Y);
 
         await Clients.Caller.SendAsync(
             "PlayerHealth",
-            _playerService.GetPlayerHealth(Context.ConnectionId));
+            _playerService.GetPlayerHealth(playerId));
 
+        // Send existing players to the newly connected client.
+        foreach (var pair in _playerService.GetAllPositions())
+        {
+            if (pair.Key == playerId)
+                continue;
+
+            await Clients.Caller.SendAsync(
+                "OtherPlayerSpawned",
+                pair.Key,
+                pair.Value.X,
+                pair.Value.Y);
+        }
+
+        // Tell existing clients about the new player.
+        await Clients.Others.SendAsync(
+            "OtherPlayerSpawned",
+            playerId,
+            position.X,
+            position.Y);
+
+        // Preserve enemy synchronization.
         foreach (var pair in _gameManager.GetEnemies())
         {
             await Clients.Caller.SendAsync(
@@ -83,11 +116,15 @@ public sealed class GameHub : Hub
         await base.OnConnectedAsync();
     }
 
-    public override Task OnDisconnectedAsync(Exception? exception)
+    public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        _playerService.RemovePlayer(Context.ConnectionId);
-        _bombService.RemovePlayerBomb(Context.ConnectionId);
+        var playerId = Context.ConnectionId;
 
-        return base.OnDisconnectedAsync(exception);
+        await Clients.Others.SendAsync("PlayerLeft", playerId);
+
+        _playerService.RemovePlayer(playerId);
+        _bombService.RemovePlayerBomb(playerId);
+
+        await base.OnDisconnectedAsync(exception);
     }
 }
