@@ -3,6 +3,7 @@ package bomberman;
 import bomberman.model.GameState;
 import bomberman.network.NetworkManager;
 import bomberman.ui.GamePanel;
+import bomberman.sound.ClientSoundEvents;
 
 import javax.swing.*;
 import java.awt.event.WindowAdapter;
@@ -12,6 +13,7 @@ public class Main {
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
             GameState gameState = new GameState();
+            ClientSoundEvents soundEvents = ClientSoundEvents.createDefault();
 
             // NetworkManager updates UI by calling panel.repaint() via callback
             final GamePanel[] panelHolder = new GamePanel[1];
@@ -19,7 +21,7 @@ public class Main {
                 if (panelHolder[0] != null) {
                     panelHolder[0].repaint();
                 }
-            });
+            }, soundEvents);
 
             GamePanel panel = new GamePanel(gameState, networkManager);
             panelHolder[0] = panel;

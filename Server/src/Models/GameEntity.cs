@@ -24,6 +24,12 @@ public abstract class GameEntity
             ?? throw new ArgumentNullException(nameof(damageSystem));
     }
 
+    protected GameEntity(GameEntity source)
+    {
+        Health = source.Health;
+        _damageSystem = source._damageSystem.Clone();
+    }
+
     public void TakeDamage(int damage)
     {
         if (IsDead || damage <= 0)

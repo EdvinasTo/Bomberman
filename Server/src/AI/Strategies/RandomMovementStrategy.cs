@@ -6,6 +6,8 @@ public sealed class RandomMovementStrategy : IMovementStrategy
     public string Name => "Random movement";
     public RandomMovementStrategy() : this(Random.Shared) { }
     public RandomMovementStrategy(Random random) => _random = random;
+    // A clone gets an independent random stream, rather than copying its sequence.
+    public IMovementStrategy Clone() => new RandomMovementStrategy(new Random());
     public GridPosition GetNextPosition(GridPosition c, GridPosition p, int minX, int minY, int maxX, int maxY)
     {
         var direction = _random.Next(4);

@@ -3,6 +3,7 @@ namespace Bomberman.Server.src.Patterns.Strategy;
 public sealed class FleeFromPlayerStrategy : IMovementStrategy
 {
     public string Name => "Flee from player";
+    public IMovementStrategy Clone() => new FleeFromPlayerStrategy();
     public GridPosition GetNextPosition(GridPosition c, GridPosition p, int minX, int minY, int maxX, int maxY)
     {
         int dx = Math.Sign(c.X - p.X), dy = Math.Sign(c.Y - p.Y);

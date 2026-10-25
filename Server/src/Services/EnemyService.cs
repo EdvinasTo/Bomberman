@@ -4,6 +4,8 @@ using Bomberman.Server.src.Patterns.Singleton;
 using Bomberman.Server.src.Patterns.Strategy;
 using Microsoft.AspNetCore.SignalR;
 using Bomberman.Server.Blocks.Damage;
+using Bomberman.Server.src.Patterns.FactoryMethod;
+using Bomberman.Server.src.Patterns.Prototype;
 
 namespace Bomberman.Server.src.Services;
 
@@ -13,8 +15,11 @@ public sealed class EnemyService : BackgroundService
     private readonly IPlayerService _playerService;
     private readonly GameManager _gameManager = GameManager.Instance;
 
-    private readonly Dictionary<string, PatrolStrategy> _patrol = new();
-    private readonly Dictionary<string, RandomMovementStrategy> _random = new();
+    private readonly MovementStrategyCreator _patrolCreator = new PatrolCreator();
+    private readonly MovementStrategyCreator _randomCreator = new RandomMovementCreator();
+    private readonly MovementStrategyCreator _chaseCreator = new ChasePlayerCreator();
+    private readonly MovementStrategyCreator _fleeCreator = new FleeFromPlayerCreator();
+    private readonly Dictionary<string, IEnemyPrototype> _prototypes = new();
 
     private static readonly GridPosition[] SpawnPositions =
     {
@@ -29,6 +34,10 @@ public sealed class EnemyService : BackgroundService
     {
         _hubContext = hubContext;
         _playerService = playerService;
+        RegisterPrototype("Patrol", new Enemy(
+            new GridPosition(0, 0),
+            _patrolCreator,
+            new HealthBasedDamage()));
     }
 
     protected override async Task ExecuteAsync(
@@ -64,20 +73,22 @@ public sealed class EnemyService : BackgroundService
 
                         if (enemy.Health <= 1)
                         {
-                            enemy.SetStrategy(new FleeFromPlayerStrategy());
+                            enemy.SetMovementCreator(_fleeCreator);
                         }
                         else if (distance <= 180)
                         {
-                            enemy.SetStrategy(new ChasePlayerStrategy());
+                            enemy.SetMovementCreator(_chaseCreator);
                         }
                         else if (distance <= 300)
                         {
-                            enemy.SetStrategy(_random[pair.Key]);
+                            enemy.SetMovementCreator(_randomCreator);
                         }
                         else
                         {
-                            enemy.SetStrategy(_patrol[pair.Key]);
+                            enemy.SetMovementCreator(_patrolCreator);
                         }
+
+                        enemy.UpdateBehavior();
 
                         Console.WriteLine(
                             $"Enemy {pair.Key} | HP: {enemy.Health} | " +
@@ -149,30 +160,43 @@ public sealed class EnemyService : BackgroundService
         }
     }
 
-    private void SpawnEnemies()
+    public void RegisterPrototype(string name, IEnemyPrototype prototype)
     {
-        for (int i = 0; i < SpawnPositions.Length; i++)
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(prototype);
+        _prototypes[name] = prototype;
+    }
+
+    public Enemy SpawnEnemy(string name, int x, int y)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (!_prototypes.TryGetValue(name, out var prototype))
+            throw new KeyNotFoundException($"Enemy prototype '{name}' is not registered.");
+
+        var enemy = prototype.Clone();
+        enemy.SetPosition(new GridPosition(x, y));
+        string id = Guid.NewGuid().ToString();
+
+        if (!_gameManager.TryAddEnemy(id, enemy))
+            throw new InvalidOperationException($"Could not add enemy '{id}'.");
+
+        _hubContext.Clients.All.SendAsync(
+            "EnemySpawned",
+            id,
+            enemy.Position.X,
+            enemy.Position.Y,
+            enemy.Health)
+            .GetAwaiter()
+            .GetResult();
+
+        return enemy;
+    }
+
+    public void SpawnEnemies()
+    {
+        foreach (var position in SpawnPositions)
         {
-            string id = Guid.NewGuid().ToString();
-
-            var enemy = new Enemy(
-                SpawnPositions[i],
-                new PatrolStrategy(),
-                new HealthBasedDamage());
-
-            _gameManager.TryAddEnemy(id, enemy);
-
-            _patrol[id] = new PatrolStrategy();
-            _random[id] = new RandomMovementStrategy();
-
-            _hubContext.Clients.All.SendAsync(
-                "EnemySpawned",
-                id,
-                enemy.Position.X,
-                enemy.Position.Y,
-                2)
-                .GetAwaiter()
-                .GetResult();
+            SpawnEnemy("Patrol", position.X, position.Y);
         }
     }
 

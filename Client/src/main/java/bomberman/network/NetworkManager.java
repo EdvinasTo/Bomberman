@@ -4,6 +4,8 @@ package bomberman.network;
 import com.microsoft.signalr.HubConnection;
 import com.microsoft.signalr.HubConnectionBuilder;
 import bomberman.model.GameState;
+import bomberman.sound.ClientSoundEvents;
+import bomberman.sound.GameEvent;
 
 import javax.swing.*;
 
@@ -11,12 +13,19 @@ public class NetworkManager {
     private final HubConnection hub;
     private final GameState gameState;
     private final Runnable onStateUpdated;
+    private final ClientSoundEvents soundEvents;
 
     private volatile boolean ready = false;
 
     public NetworkManager(GameState gameState, Runnable onStateUpdated) {
+        this(gameState, onStateUpdated, new ClientSoundEvents());
+    }
+
+    public NetworkManager(GameState gameState, Runnable onStateUpdated,
+                          ClientSoundEvents soundEvents) {
         this.gameState = gameState;
         this.onStateUpdated = onStateUpdated;
+        this.soundEvents = java.util.Objects.requireNonNull(soundEvents, "soundEvents");
 
         this.hub = HubConnectionBuilder
                 .create("http://localhost:5000/game")
@@ -57,18 +66,20 @@ public class NetworkManager {
             notifyUI();
         }, String.class);
 
-        hub.on("PlayerDied", () ->
-                SwingUtilities.invokeLater(() ->
-                        JOptionPane.showMessageDialog(
-                                null,
-                                "You died! Restart the game to play again."
-                        )
-                )
-        );
+        hub.on("PlayerDied", () -> {
+            soundEvents.onGameEvent(GameEvent.PLAYER_DIED);
+            SwingUtilities.invokeLater(() ->
+                    JOptionPane.showMessageDialog(
+                            null,
+                            "You died! Restart the game to play again."
+                    )
+            );
+        });
 
         // Bombs.
         hub.on("BombPlaced", (String ownerId, Integer x, Integer y) -> {
             gameState.addBomb(x, y, 60, ownerId);
+            soundEvents.onGameEvent(GameEvent.BOMB_PLACED);
             notifyUI();
         }, String.class, Integer.class, Integer.class);
 
@@ -76,6 +87,7 @@ public class NetworkManager {
                 (String ownerId, Integer x, Integer y, Integer radius) -> {
                     gameState.removeBomb(x, y);
                     gameState.addExplosion(x, y, radius);
+                    soundEvents.onGameEvent(GameEvent.EXPLOSION);
                     notifyUI();
                 },
                 String.class, Integer.class, Integer.class, Integer.class);
@@ -177,6 +189,7 @@ public class NetworkManager {
 
     public void disconnect() {
         ready = false;
+        soundEvents.close();
 
         try {
             hub.stop().blockingAwait();
