@@ -1,24 +1,23 @@
+
 using System.Collections.Concurrent;
+using Bomberman.Server.Blocks;
+using Bomberman.Server.Blocks.Damage;
 using Bomberman.Server.src.Models;
 using Bomberman.Server.src.Patterns.Strategy;
-using Bomberman.Server.Blocks.Damage;
 
 namespace Bomberman.Server.src.Patterns.Singleton;
 
-/// <summary>
-/// Thread-safe Singleton and authoritative in-memory game state.
-/// The double-checked locking structure intentionally follows the requested pattern.
-/// </summary>
 public sealed class GameManager
 {
     private static volatile GameManager? instance;
     private static readonly object syncRoot = new();
 
+    private readonly ConcurrentDictionary<string, Player> _players = new();
     private readonly ConcurrentDictionary<string, PlayerPosition> _playerPositions = new();
-    private readonly ConcurrentDictionary<string, int> _playerHealth = new();
     private readonly ConcurrentDictionary<string, byte> _playersWithActiveBombs = new();
-    private readonly ConcurrentDictionary<(int X, int Y), bool> _blocks = new();
+    private readonly ConcurrentDictionary<(int X, int Y), Block> _blocks = new();
     private readonly ConcurrentDictionary<string, Enemy> _enemies = new();
+
     private int _roundNumber;
 
     private const int PlayerSize = 30;
@@ -27,26 +26,36 @@ public sealed class GameManager
 
     private GameManager()
     {
-        // false = indestructible, true = destructible.
+        // Indestructible border blocks.
         for (int x = 0; x <= 600; x += BlockSize)
         {
-            _blocks[(x, 0)] = false;
-            _blocks[(x, 420)] = false;
+            _blocks[(x, 0)] = new IndestructibleBlock();
+            _blocks[(x, 420)] = new IndestructibleBlock();
         }
 
         for (int y = 60; y <= 360; y += BlockSize)
         {
-            _blocks[(0, y)] = false;
-            _blocks[(600, y)] = false;
+            _blocks[(0, y)] = new IndestructibleBlock();
+            _blocks[(600, y)] = new IndestructibleBlock();
         }
 
-        foreach (var block in new[]
+        // Internal indestructible obstacle.
+        _blocks[(300, 180)] = new IndestructibleBlock();
+
+        // Destructible blocks.
+        foreach (var position in new[]
         {
-            (180, 120), (240, 120), (360, 120),
-            (420, 180), (180, 240), (300, 300), (420, 300)
+            (180, 120),
+            (240, 120),
+            (360, 120),
+            (420, 180),
+            (180, 240),
+            (300, 300),
+            (420, 300)
         })
         {
-            _blocks[block] = true;
+            _blocks[position] =
+                new DestructibleBlock(new OneHitDamage());
         }
     }
 
@@ -69,17 +78,26 @@ public sealed class GameManager
 
     public int RoundNumber => Volatile.Read(ref _roundNumber);
 
-    public int StartNextRound() => Interlocked.Increment(ref _roundNumber);
+    public int StartNextRound() =>
+        Interlocked.Increment(ref _roundNumber);
 
-    public PlayerPosition UpdatePlayerPosition(string connectionId, int x, int y)
+    private Player GetOrCreatePlayer(string connectionId)
     {
-        _playerHealth.TryAdd(connectionId, MaxHealth);
+        return _players.GetOrAdd(
+            connectionId,
+            _ => new Player(new HealthBasedDamage()));
+    }
+
+    public PlayerPosition UpdatePlayerPosition(
+        string connectionId, int x, int y)
+    {
+        GetOrCreatePlayer(connectionId);
+
         var current = GetPlayerPosition(connectionId);
 
         x = Math.Clamp(x, 0, 610);
         y = Math.Clamp(y, 0, 450);
 
-        // Check the full player rectangle, not only its top-left point.
         if (CanOccupy(x, y))
         {
             var updated = new PlayerPosition(x, y);
@@ -93,24 +111,33 @@ public sealed class GameManager
 
     public PlayerPosition GetPlayerPosition(string connectionId)
     {
-        if (_playerPositions.TryGetValue(connectionId, out var position))
-            return position;
+        GetOrCreatePlayer(connectionId);
 
-        _playerHealth.TryAdd(connectionId, MaxHealth);
-        var initial = new PlayerPosition(100, 100);
-        _playerPositions.TryAdd(connectionId, initial);
-        return _playerPositions[connectionId];
+        return _playerPositions.GetOrAdd(
+            connectionId,
+            _ => new PlayerPosition(100, 100));
     }
 
-    public IReadOnlyCollection<KeyValuePair<string, PlayerPosition>> GetAllPlayerPositions() =>
-        _playerPositions.ToArray();
+    public IReadOnlyCollection<KeyValuePair<string, PlayerPosition>>
+        GetAllPlayerPositions()
+    {
+        // Ensure every registered position has a Player object.
+        foreach (var pair in _playerPositions)
+            GetOrCreatePlayer(pair.Key);
 
-    public int GetPlayerHealth(string connectionId) =>
-        _playerHealth.GetOrAdd(connectionId, MaxHealth);
+        return _playerPositions.ToArray();
+    }
 
-    public int ApplyExplosionDamage(string connectionId, int bombX, int bombY, int radius)
+    public int GetPlayerHealth(string connectionId)
+    {
+        return GetOrCreatePlayer(connectionId).Health;
+    }
+
+    public int ApplyExplosionDamage(
+        string connectionId, int bombX, int bombY, int radius)
     {
         var position = GetPlayerPosition(connectionId);
+
         int centerX = position.X + PlayerSize / 2;
         int centerY = position.Y + PlayerSize / 2;
 
@@ -120,26 +147,16 @@ public sealed class GameManager
             (Math.Abs(centerX - bombX) <= PlayerSize / 2 &&
              Math.Abs(centerY - bombY) <= radius + PlayerSize / 2);
 
-        if (!hit)
-            return GetPlayerHealth(connectionId);
+        if (hit)
+            GetOrCreatePlayer(connectionId).TakeDamage(1);
 
-        return ApplyPlayerDamage(connectionId, 1);
+        return GetPlayerHealth(connectionId);
     }
 
-    public int ApplyPlayerDamage(
-    string connectionId,
-    int damage,
-    IDamageSystem? damageSystem = null)
+    public int ApplyPlayerDamage(string connectionId, int damage)
     {
-        if (damage <= 0)
-            return GetPlayerHealth(connectionId);
-
-        var system = damageSystem ?? new HealthBasedDamage();
-
-        return _playerHealth.AddOrUpdate(
-            connectionId,
-            system.ApplyDamage(MaxHealth, damage),
-            (_, health) => system.ApplyDamage(health, damage));
+        GetOrCreatePlayer(connectionId).TakeDamage(damage);
+        return GetPlayerHealth(connectionId);
     }
 
     public bool TryStartPlayerBomb(string connectionId) =>
@@ -150,13 +167,17 @@ public sealed class GameManager
 
     public bool CanOccupy(int x, int y)
     {
-        foreach (var block in _blocks)
+        foreach (var pair in _blocks)
         {
-            int bx = block.Key.X;
-            int by = block.Key.Y;
+            int bx = pair.Key.X;
+            int by = pair.Key.Y;
 
-            bool overlaps = x < bx + BlockSize && x + PlayerSize > bx &&
-                            y < by + BlockSize && y + PlayerSize > by;
+            bool overlaps =
+                x < bx + BlockSize &&
+                x + PlayerSize > bx &&
+                y < by + BlockSize &&
+                y + PlayerSize > by;
+
             if (overlaps)
                 return false;
         }
@@ -169,45 +190,58 @@ public sealed class GameManager
     {
         var destroyed = new List<(int X, int Y)>();
 
-        foreach (var block in _blocks)
+        foreach (var pair in _blocks)
         {
-            if (!block.Value) // Indestructible.
+            var block = pair.Value;
+
+            if (!block.IsDestructible)
                 continue;
 
-            int bx = block.Key.X;
-            int by = block.Key.Y;
-            int blockCenterX = bx + BlockSize / 2;
-            int blockCenterY = by + BlockSize / 2;
+            int bx = pair.Key.X;
+            int by = pair.Key.Y;
 
-            bool inHorizontalBlast =
-                Math.Abs(blockCenterY - bombY) <= BlockSize / 2 &&
-                Math.Abs(blockCenterX - bombX) <= radius + BlockSize / 2;
-            bool inVerticalBlast =
-                Math.Abs(blockCenterX - bombX) <= BlockSize / 2 &&
-                Math.Abs(blockCenterY - bombY) <= radius + BlockSize / 2;
+            int centerX = bx + BlockSize / 2;
+            int centerY = by + BlockSize / 2;
 
-            if ((inHorizontalBlast || inVerticalBlast) &&
-                _blocks.TryRemove(block.Key, out _))
+            bool horizontalHit =
+                Math.Abs(centerY - bombY) <= BlockSize / 2 &&
+                Math.Abs(centerX - bombX) <= radius + BlockSize / 2;
+
+            bool verticalHit =
+                Math.Abs(centerX - bombX) <= BlockSize / 2 &&
+                Math.Abs(centerY - bombY) <= radius + BlockSize / 2;
+
+            if (!horizontalHit && !verticalHit)
+                continue;
+
+            block.TakeDamage(1);
+
+            if (block.IsDestroyed &&
+                _blocks.TryRemove(pair.Key, out _))
             {
-                destroyed.Add(block.Key);
+                destroyed.Add(pair.Key);
             }
         }
 
         return destroyed;
     }
 
-    public IReadOnlyCollection<KeyValuePair<string, Enemy>> GetEnemies() => _enemies.ToArray();
+    public IReadOnlyCollection<KeyValuePair<string, Enemy>> GetEnemies() =>
+        _enemies.ToArray();
 
-    public bool TryAddEnemy(string id, Enemy enemy) => _enemies.TryAdd(id, enemy);
+    public bool TryAddEnemy(string id, Enemy enemy) =>
+        _enemies.TryAdd(id, enemy);
 
-    public bool TryGetEnemy(string id, out Enemy? enemy) => _enemies.TryGetValue(id, out enemy);
+    public bool TryGetEnemy(string id, out Enemy? enemy) =>
+        _enemies.TryGetValue(id, out enemy);
 
-    public bool RemoveEnemy(string id) => _enemies.TryRemove(id, out _);
+    public bool RemoveEnemy(string id) =>
+        _enemies.TryRemove(id, out _);
 
     public void RemovePlayer(string connectionId)
     {
+        _players.TryRemove(connectionId, out _);
         _playerPositions.TryRemove(connectionId, out _);
-        _playerHealth.TryRemove(connectionId, out _);
         _playersWithActiveBombs.TryRemove(connectionId, out _);
     }
 }

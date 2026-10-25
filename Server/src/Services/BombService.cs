@@ -45,20 +45,17 @@ public sealed class BombService : IBombService
         {
             var position = _playerService.GetPosition(connectionId);
 
-            // Explosion coordinates use the centre of the player/bomb.
             int bombX = position.X + EntitySize / 2;
             int bombY = position.Y + EntitySize / 2;
 
             await _hubContext.Clients.All.SendAsync(
                 "BombPlaced", connectionId, position.X, position.Y);
 
-            // Movement remains available while this asynchronous timer runs.
             await Task.Delay(BombDelayMs);
 
             await _hubContext.Clients.All.SendAsync(
                 "Exploded", connectionId, bombX, bombY, BlastRadius);
 
-            // Damage players in the explosion.
             foreach (var player in _playerService.GetAllPositions())
             {
                 int health = _playerService.ApplyExplosionDamage(
@@ -74,7 +71,6 @@ public sealed class BombService : IBombService
                 }
             }
 
-            // Damage each enemy once per explosion.
             foreach (var pair in _gameManager.GetEnemies())
             {
                 var enemy = pair.Value;
@@ -108,7 +104,6 @@ public sealed class BombService : IBombService
                 }
             }
 
-            // Remove destructible blocks hit by the blast.
             foreach (var block in _gameManager.DestroyBlocksInBlast(
                          bombX, bombY, BlastRadius))
             {

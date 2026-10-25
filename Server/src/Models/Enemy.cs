@@ -1,32 +1,28 @@
-
 using Bomberman.Server.Blocks.Damage;
 using Bomberman.Server.src.Interfaces;
+using Bomberman.Server.src.Models;
 
 namespace Bomberman.Server.src.Patterns.Strategy;
 
-public sealed class Enemy
+public sealed class Enemy : GameEntity
 {
     public GridPosition Position { get; private set; }
 
     public IMovementStrategy MovementStrategy { get; private set; }
 
-    public int Health { get; private set; } = 2;
-
-    public bool IsDead => Health <= 0;
-
-    private readonly IDamageSystem _damageSystem;
-
     public Enemy(
         GridPosition start,
         IMovementStrategy movementStrategy,
-        IDamageSystem? damageSystem = null)
+        IDamageSystem damageSystem)
+        : base(2, damageSystem)
     {
         Position = start;
+
         MovementStrategy = movementStrategy
             ?? throw new ArgumentNullException(nameof(movementStrategy));
-
-        _damageSystem = damageSystem ?? new HealthBasedDamage();
     }
+
+    public override bool IsAlive => Health > 0;
 
     public void SetStrategy(IMovementStrategy strategy)
     {
@@ -53,11 +49,5 @@ public sealed class Enemy
     public void SetPosition(GridPosition position)
     {
         Position = position;
-    }
-
-    public void TakeDamage(int damage)
-    {
-        if (!IsDead && damage > 0)
-            Health = _damageSystem.ApplyDamage(Health, damage);
     }
 }

@@ -7,9 +7,6 @@ using Bomberman.Server.Blocks.Damage;
 
 namespace Bomberman.Server.src.Services;
 
-/// <summary>
-/// Runs enemy AI. GameManager owns the authoritative enemy collection.
-/// </summary>
 public sealed class EnemyService : BackgroundService
 {
     private readonly IHubContext<GameHub> _hubContext;
@@ -65,7 +62,6 @@ public sealed class EnemyService : BackgroundService
                             target.Value.X,
                             target.Value.Y));
 
-                        // Select the enemy's movement strategy.
                         if (enemy.Health <= 1)
                         {
                             enemy.SetStrategy(new FleeFromPlayerStrategy());
@@ -87,17 +83,14 @@ public sealed class EnemyService : BackgroundService
                             $"Enemy {pair.Key} | HP: {enemy.Health} | " +
                             $"Strategy: {enemy.MovementStrategy.GetType().Name}");
 
-                        // Save the position before moving.
                         var previousPosition = enemy.Position;
 
-                        // Calculate the enemy's next position.
                         var position = enemy.MoveToward(
                             new GridPosition(
                                 target.Value.X,
                                 target.Value.Y),
                             0, 0, 610, 450);
 
-                        // Reject movement if the destination overlaps a block.
                         if (!_gameManager.CanOccupy(
                                 position.X,
                                 position.Y))
@@ -106,7 +99,6 @@ public sealed class EnemyService : BackgroundService
                             position = previousPosition;
                         }
 
-                        // Send the authoritative enemy position to clients.
                         await _hubContext.Clients.All.SendAsync(
                             "EnemyPosition",
                             pair.Key,
@@ -114,7 +106,6 @@ public sealed class EnemyService : BackgroundService
                             position.Y,
                             stoppingToken);
 
-                        // Ghost contact instantly kills a player.
                         foreach (var player in players)
                         {
                             if (_gameManager.GetPlayerHealth(player.Key) <= 0)
@@ -129,10 +120,7 @@ public sealed class EnemyService : BackgroundService
                                 continue;
                             }
 
-                            int health = _playerService.ApplyDamage(
-                                player.Key,
-                                1,
-                                new OneHitDamage());
+                            int health = _playerService.ApplyDamage(player.Key, 1);
 
                             await _hubContext.Clients.Client(player.Key)
                                 .SendAsync(
@@ -169,7 +157,8 @@ public sealed class EnemyService : BackgroundService
 
             var enemy = new Enemy(
                 SpawnPositions[i],
-                new PatrolStrategy());
+                new PatrolStrategy(),
+                new HealthBasedDamage());
 
             _gameManager.TryAddEnemy(id, enemy);
 

@@ -1,4 +1,3 @@
-
 using Bomberman.Server.src.Interfaces;
 using Bomberman.Server.src.Patterns.Singleton;
 using Microsoft.AspNetCore.SignalR;
@@ -28,11 +27,9 @@ public sealed class GameHub : Hub
 
         var position = _playerService.UpdatePosition(playerId, x, y);
 
-        // Update the player who moved.
         await Clients.Caller.SendAsync(
             "Position", position.X, position.Y);
 
-        // Update every other connected player.
         await Clients.Others.SendAsync(
             "OtherPlayerPosition",
             playerId,
@@ -48,7 +45,6 @@ public sealed class GameHub : Hub
     {
         string connectionId = Context.ConnectionId;
 
-        // Do not wait for the bomb countdown inside this hub invocation.
         _ = RunBombSafelyAsync(connectionId);
 
         return Task.CompletedTask;
@@ -74,7 +70,6 @@ public sealed class GameHub : Hub
         var playerId = Context.ConnectionId;
         var position = _playerService.GetPosition(playerId);
 
-        // Send the new player their own initial state.
         await Clients.Caller.SendAsync(
             "Position", position.X, position.Y);
 
@@ -82,7 +77,6 @@ public sealed class GameHub : Hub
             "PlayerHealth",
             _playerService.GetPlayerHealth(playerId));
 
-        // Send existing players to the newly connected client.
         foreach (var pair in _playerService.GetAllPositions())
         {
             if (pair.Key == playerId)
@@ -95,14 +89,12 @@ public sealed class GameHub : Hub
                 pair.Value.Y);
         }
 
-        // Tell existing clients about the new player.
         await Clients.Others.SendAsync(
             "OtherPlayerSpawned",
             playerId,
             position.X,
             position.Y);
 
-        // Preserve enemy synchronization.
         foreach (var pair in _gameManager.GetEnemies())
         {
             await Clients.Caller.SendAsync(

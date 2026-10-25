@@ -2,6 +2,8 @@ namespace Bomberman.Server.Blocks;
 
 public sealed class IndestructibleBlock : Block
 {
+    public override bool IsDestructible => false;
+
     public IndestructibleBlock()
         : base(int.MaxValue, null)
     {
@@ -9,6 +11,6 @@ public sealed class IndestructibleBlock : Block
 
     public override void TakeDamage(int damage)
     {
-        // Indestructible blocks ignore all damage; no NoDamage class is needed.
+        // This block cannot be damaged.
     }
 }

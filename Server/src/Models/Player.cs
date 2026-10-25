@@ -1,26 +1,14 @@
+
 using Bomberman.Server.Blocks.Damage;
 
-namespace Bomberman.Server.Blocks;
+namespace Bomberman.Server.src.Models;
 
-// Bridge Abstraction: Player also delegates damage behavior to IDamageSystem.
-// Player remains concrete because the game needs to instantiate players.
-public sealed class Player
+public sealed class Player : GameEntity
 {
-    private readonly IDamageSystem _damageSystem;
-
-    public int Health { get; private set; } = 3;
-    public bool IsDead => Health <= 0;
-
-    public Player(IDamageSystem? damageSystem = null)
+    public Player(IDamageSystem damageSystem)
+        : base(3, damageSystem)
     {
-        _damageSystem = damageSystem ?? new HealthBasedDamage();
     }
 
-    public void TakeDamage(int damage)
-    {
-        if (IsDead || damage <= 0)
-            return;
-
-        Health = _damageSystem.ApplyDamage(Health, damage);
-    }
+    public override bool IsAlive => Health > 0;
 }
