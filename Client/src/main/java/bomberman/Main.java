@@ -16,11 +16,15 @@ public class Main {
             ClientSoundEvents soundEvents = ClientSoundEvents.createDefault();
 
             // NetworkManager updates UI by calling panel.repaint() via callback
-            //final GamePanel[] panelHolder = new GamePanel[1];
-            NetworkManager networkManager = new NetworkManager(gameState, soundEvents);
+            final GamePanel[] panelHolder = new GamePanel[1];
+            NetworkManager networkManager = new NetworkManager(gameState, () -> {
+                if (panelHolder[0] != null) {
+                    panelHolder[0].repaint();
+                }
+            }, soundEvents);
+
             GamePanel panel = new GamePanel(gameState, networkManager);
-            gameState.subscribe(panel);
-            gameState.subscribe(soundEvents);
+            panelHolder[0] = panel;
 
             JFrame frame = new JFrame("Bomberman Prototipas");
             frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);

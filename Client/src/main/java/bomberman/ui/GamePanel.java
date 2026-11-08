@@ -7,15 +7,13 @@ import bomberman.model.EnemyView;
 import bomberman.model.Explosion;
 import bomberman.model.GameState;
 import bomberman.network.NetworkManager;
-import bomberman.observer.IGameObserver;
-import bomberman.sound.GameEvent;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.util.Map;
 
-public class GamePanel extends JPanel implements IGameObserver {
+public class GamePanel extends JPanel {
     private final GameState gameState;
     private final NetworkManager networkManager;
     private final Timer movementTimer;
@@ -27,10 +25,6 @@ public class GamePanel extends JPanel implements IGameObserver {
     private boolean right;
     private boolean up;
     private boolean down;
-    @Override
-    public void onGameEvent(GameEvent event) {
-        repaint();
-    }
 
     public GamePanel(GameState gameState, NetworkManager networkManager) {
         this.gameState = gameState;
@@ -52,7 +46,6 @@ public class GamePanel extends JPanel implements IGameObserver {
 
         getInputMap(WHEN_IN_FOCUSED_WINDOW)
                 .put(KeyStroke.getKeyStroke("pressed SPACE"), "DROP_BOMB");
-
         getActionMap().put("DROP_BOMB", new AbstractAction() {
             @Override
             public void actionPerformed(ActionEvent e) {
@@ -60,6 +53,7 @@ public class GamePanel extends JPanel implements IGameObserver {
             }
         });
 
+        //UNDO
         getInputMap(WHEN_IN_FOCUSED_WINDOW)
                 .put(KeyStroke.getKeyStroke("pressed Z"), "UNDO");
         getActionMap().put("UNDO", new AbstractAction() {

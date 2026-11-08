@@ -7,11 +7,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import bomberman.observer.*;
-import bomberman.sound.GameEvent;
-import java.util.concurrent.CopyOnWriteArrayList;
 
-public class GameState implements IGameSubject {
+public class GameState {
     private int playerX = 100;
     private int playerY = 100;
     private volatile int playerHealth = 3;
@@ -30,8 +27,6 @@ public class GameState implements IGameSubject {
 
     private final Map<String, BlockView> blocks =
             new ConcurrentHashMap<>();
-
-    private final List<IGameObserver> observers = new CopyOnWriteArrayList<>();
 
     public GameState() {
         // Indestructible border blocks.
@@ -80,7 +75,6 @@ public class GameState implements IGameSubject {
 
     public void removeBlock(int x, int y) {
         blocks.remove(key(x, y));
-        notifyObservers(GameEvent.BLOCK_DESTROYED);
     }
 
     public synchronized int getPlayerX() {
@@ -97,12 +91,11 @@ public class GameState implements IGameSubject {
 
     public void setPlayerHealth(int health) {
         playerHealth = Math.max(0, Math.min(3, health));
-        notifyObservers(GameEvent.PLAYER_MOVED);
     }
 
-    public void setPlayerPosition(int x, int y) {
-        synchronized (this) { playerX = x; playerY = y; }
-        notifyObservers(GameEvent.PLAYER_MOVED);
+    public synchronized void setPlayerPosition(int x, int y) {
+        playerX = x;
+        playerY = y;
     }
 
     // Remote player state.
@@ -111,15 +104,16 @@ public class GameState implements IGameSubject {
     }
 
     public void updateOtherPlayer(String id, int x, int y) {
-        if (id == null || id.isBlank()) { return; }
+        if (id == null || id.isBlank()) {
+            return;
+        }
+
         otherPlayers.put(id, new Point(x, y));
-        notifyObservers(GameEvent.OTHER_PLAYER_CHANGED);
     }
 
     public void removeOtherPlayer(String id) {
         if (id != null) {
             otherPlayers.remove(id);
-            notifyObservers(GameEvent.OTHER_PLAYER_CHANGED);
         }
     }
 
@@ -129,7 +123,6 @@ public class GameState implements IGameSubject {
 
     public void addBomb(int x, int y, int radius, String ownerId) {
         bombs.add(new Bomb(x, y, radius, ownerId));
-        notifyObservers(GameEvent.BOMB_PLACED);
     }
 
     public void removeBomb(int x, int y) {
@@ -138,7 +131,6 @@ public class GameState implements IGameSubject {
                     bomb.isAt(x, y)
                     || bomb.isAt(x - 15, y - 15));
         }
-        notifyObservers(GameEvent.BOMB_REMOVED);
     }
 
     public List<Explosion> getExplosions() {
@@ -148,13 +140,14 @@ public class GameState implements IGameSubject {
     public void addExplosion(int x, int y, int radius) {
         // Render a cross using 30px cells.
         int step = 30;
+
         for (int offset = -radius; offset <= radius; offset += step) {
             explosions.add(new Explosion(x + offset, y));
+
             if (offset != 0) {
                 explosions.add(new Explosion(x, y + offset));
             }
         }
-        notifyObservers(GameEvent.EXPLOSION);
     }
 
     public void removeExplosion(int x, int y, int radius) {
@@ -165,7 +158,6 @@ public class GameState implements IGameSubject {
                     || (explosion.getX() == x
                             && Math.abs(explosion.getY() - y) <= radius));
         }
-        notifyObservers(GameEvent.EXPLOSION_ENDED);
     }
 
     public Map<String, EnemyView> getEnemies() {
@@ -173,30 +165,35 @@ public class GameState implements IGameSubject {
     }
 
     public void updateEnemy(String id, int x, int y, int health) {
-        if (id == null || id.isBlank()) return;
+        if (id == null || id.isBlank()) {
+            return;
+        }
 
         if (health <= 0) {
             enemies.remove(id);
-            notifyObservers(GameEvent.ENEMY_CHANGED);
             return;
         }
 
         enemies.compute(id, (key, enemy) -> {
-            if (enemy == null) return new EnemyView(id, x, y, health);
+            if (enemy == null) {
+                return new EnemyView(id, x, y, health);
+            }
+
             enemy.setPosition(x, y);
             enemy.setHealth(health);
             return enemy;
         });
-        notifyObservers(GameEvent.ENEMY_CHANGED);
     }
 
     public void updateEnemyPosition(String id, int x, int y) {
-        if (id == null || id.isBlank()) return;
+        if (id == null || id.isBlank()) {
+            return;
+        }
+
         enemies.computeIfPresent(id, (key, enemy) -> {
             enemy.setPosition(x, y);
             return enemy;
         });
-        notifyObservers(GameEvent.ENEMY_CHANGED);
     }
 
     public void updateEnemyHealth(String id, int health) {
@@ -208,22 +205,11 @@ public class GameState implements IGameSubject {
             enemy.setHealth(health);
             return health <= 0 ? null : enemy;
         });
-        notifyObservers(GameEvent.ENEMY_CHANGED);
     }
 
     public void removeEnemy(String id) {
         if (id != null) {
             enemies.remove(id);
-            notifyObservers(GameEvent.ENEMY_CHANGED);
         }
-    }
-
-    @Override
-    public void subscribe(IGameObserver o)   { if (o != null) observers.add(o); }
-    @Override
-    public void unsubscribe(IGameObserver o) { observers.remove(o); }
-    @Override
-    public void notifyObservers(GameEvent event) {
-        for (IGameObserver o : observers) o.onGameEvent(event);
     }
 }
