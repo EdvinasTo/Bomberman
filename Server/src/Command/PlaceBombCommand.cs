@@ -1,34 +1,21 @@
 ﻿using Bomberman.Server.src.Interfaces;
+using Server.src.Facade;
 
 namespace Bomberman.Server.src.Patterns.Command;
 
 public class PlaceBombCommand : ICommand
 {
-    private readonly IBombService _bombService;
+    private readonly GameFacade _facade;
     private readonly string _playerId;
-    private readonly ILogger _logger;
 
-    public PlaceBombCommand(IBombService bombService, string playerId, ILogger logger)
+    public PlaceBombCommand(GameFacade facade, string playerId)
     {
-        _bombService = bombService;
+        _facade = facade;
         _playerId = playerId;
-        _logger = logger;
     }
 
     // Fire and forget, like the old hub code: the bomb runs until it explodes.
-    public void Execute() => _ = RunSafelyAsync();
+    public void Execute() => _ = _facade.PlaceBomb(_playerId);
 
-    private async Task RunSafelyAsync()
-    {
-        try
-        {
-            await _bombService.TryPlaceBombAsync(_playerId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to process bomb for connection {ConnectionId}", _playerId);
-        }
-    }
-
-    public void Undo() => _bombService.RemovePlayerBomb(_playerId);
+    public void Undo() => _facade.CancelBomb(_playerId);
 }

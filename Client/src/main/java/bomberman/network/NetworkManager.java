@@ -17,10 +17,6 @@ public class NetworkManager {
 
     private volatile boolean ready = false;
 
-    public NetworkManager(GameState gameState, Runnable onStateUpdated) {
-        this(gameState, onStateUpdated, new ClientSoundEvents());
-    }
-
     public NetworkManager(GameState gameState, Runnable onStateUpdated,
                           ClientSoundEvents soundEvents) {
         this.gameState = gameState;

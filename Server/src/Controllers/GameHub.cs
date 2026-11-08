@@ -1,36 +1,27 @@
 using Bomberman.Server.src.Interfaces;
-using Bomberman.Server.src.Patterns.Singleton;
-using Microsoft.AspNetCore.SignalR;
 using Bomberman.Server.src.Models;
 using Bomberman.Server.src.Patterns.Command;
+using Bomberman.Server.src.Patterns.Singleton;
+using Microsoft.AspNetCore.SignalR;
+using Server.src.Facade;
 
 namespace Bomberman.Server.src.Controllers;
 
 public sealed class GameHub : Hub
 {
-    private readonly IPlayerService _playerService;
-    private readonly IBombService _bombService;
-    private readonly GameManager _gameManager = GameManager.Instance;
-    private readonly ILogger<GameHub> _logger;
-
+    private readonly GameFacade _facade;
     private readonly CommandInvoker _invoker;
 
-    public GameHub(
-        IPlayerService playerService,
-        IBombService bombService,
-        CommandInvoker invoker,
-        ILogger<GameHub> logger)
+    public GameHub(GameFacade facade, CommandInvoker invoker)
     {
-        _playerService = playerService;
-        _bombService = bombService;
+        _facade = facade;
         _invoker = invoker;
-        _logger = logger;
     }
 
     public async Task Move(int x, int y)
     {
         var playerId = Context.ConnectionId;
-        var command = new MoveCommand(_playerService, playerId, x, y);
+        var command = new MoveCommand(_facade, playerId, x, y);
         _invoker.Run(playerId, command);
         await SendPositionAsync(playerId, command.Result);
     }
@@ -38,7 +29,7 @@ public sealed class GameHub : Hub
     public Task PlaceBomb()
     {
         var playerId = Context.ConnectionId;
-        _invoker.Run(playerId, new PlaceBombCommand(_bombService, playerId, _logger));
+        _invoker.Run(playerId, new PlaceBombCommand(_facade, playerId));
         return Task.CompletedTask;
     }
 
@@ -46,69 +37,36 @@ public sealed class GameHub : Hub
     {
         var playerId = Context.ConnectionId;
         if (_invoker.UndoLast(playerId))
-            await SendPositionAsync(playerId, _playerService.GetPosition(playerId));
+            await SendPositionAsync(playerId, _facade.GetPosition(playerId));
     }
 
     private async Task SendPositionAsync(string playerId, PlayerPosition position)
     {
         await Clients.Caller.SendAsync("Position", position.X, position.Y);
         await Clients.Others.SendAsync("OtherPlayerPosition", playerId, position.X, position.Y);
-        await Clients.Caller.SendAsync("PlayerHealth", _playerService.GetPlayerHealth(playerId));
-    }
-
-    private async Task RunBombSafelyAsync(string connectionId)
-    {
-        try
-        {
-            await _bombService.TryPlaceBombAsync(connectionId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                ex,
-                "Failed to process bomb for connection {ConnectionId}",
-                connectionId);
-        }
+        await Clients.Caller.SendAsync("PlayerHealth", _facade.GetHealth(playerId));
     }
 
     public override async Task OnConnectedAsync()
     {
         var playerId = Context.ConnectionId;
-        var position = _playerService.GetPosition(playerId);
+        var position = _facade.GetPosition(playerId);
 
-        await Clients.Caller.SendAsync(
-            "Position", position.X, position.Y);
+        await Clients.Caller.SendAsync("Position", position.X, position.Y);
 
-        await Clients.Caller.SendAsync(
-            "PlayerHealth",
-            _playerService.GetPlayerHealth(playerId));
+        await Clients.Caller.SendAsync("PlayerHealth", _facade.GetHealth(playerId));
 
-        foreach (var pair in _playerService.GetAllPositions())
-        {
-            if (pair.Key == playerId)
-                continue;
-
-            await Clients.Caller.SendAsync(
-                "OtherPlayerSpawned",
-                pair.Key,
-                pair.Value.X,
-                pair.Value.Y);
-        }
+        foreach (var pair in _facade.GetOtherPlayers(playerId))
+            await Clients.Caller.SendAsync("OtherPlayerSpawned", pair.Key, pair.Value.X, pair.Value.Y);
+        
 
         await Clients.Others.SendAsync(
-            "OtherPlayerSpawned",
-            playerId,
-            position.X,
-            position.Y);
+            "OtherPlayerSpawned", playerId, position.X, position.Y);
 
-        foreach (var pair in _gameManager.GetEnemies())
+        foreach (var enemy in _facade.GetEnemies())
         {
             await Clients.Caller.SendAsync(
-                "EnemySpawned",
-                pair.Key,
-                pair.Value.Position.X,
-                pair.Value.Position.Y,
-                pair.Value.Health);
+                "EnemySpawned", enemy.Id, enemy.X, enemy.Y, enemy.Health);
         }
 
         await base.OnConnectedAsync();
@@ -121,8 +79,8 @@ public sealed class GameHub : Hub
 
         await Clients.Others.SendAsync("PlayerLeft", playerId);
 
-        _playerService.RemovePlayer(playerId);
-        _bombService.RemovePlayerBomb(playerId);
+        _facade.LeavePlayer(playerId);
+        _invoker.Clear(playerId);
 
         await base.OnDisconnectedAsync(exception);
     }

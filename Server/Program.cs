@@ -1,10 +1,11 @@
 ﻿using Bomberman.Server.src.Controllers;
 using Bomberman.Server.src.Interfaces;
+using Bomberman.Server.src.Patterns.Command;
 using Bomberman.Server.src.Patterns.Observer;
 using Bomberman.Server.src.Patterns.Singleton;
 using Bomberman.Server.src.Services;
 using Microsoft.AspNetCore.SignalR;
-using Bomberman.Server.src.Patterns.Command;
+using Server.src.Facade;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,6 +14,7 @@ builder.Services.AddSingleton<IPlayerService, PlayerService>();
 builder.Services.AddSingleton<IBombService, BombService>();
 builder.Services.AddSingleton<EnemyService>();
 builder.Services.AddSingleton<CommandInvoker>();
+builder.Services.AddSingleton<GameFacade>();
 builder.Services.AddHostedService<EnemyService>(sp => sp.GetRequiredService<EnemyService>());
 
 var app = builder.Build();

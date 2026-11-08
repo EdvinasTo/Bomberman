@@ -1,11 +1,13 @@
 ﻿using Bomberman.Server.src.Interfaces;
 using Bomberman.Server.src.Models;
+using Server.src.Facade;
+using System.Runtime.InteropServices;
 
 namespace Bomberman.Server.src.Patterns.Command;
 
 public class MoveCommand : ICommand
 {
-    private readonly IPlayerService _players;
+    private readonly GameFacade _facade;
     private readonly string _playerId;
     private readonly int _targetX;
     private readonly int _targetY;
@@ -14,9 +16,9 @@ public class MoveCommand : ICommand
 
     public PlayerPosition Result { get; private set; } = default!;
 
-    public MoveCommand(IPlayerService players, string playerId, int targetX, int targetY)
+    public MoveCommand(GameFacade facade, string playerId, int targetX, int targetY)
     {
-        _players = players;
+        _facade = facade;
         _playerId = playerId;
         _targetX = targetX;
         _targetY = targetY;
@@ -24,14 +26,14 @@ public class MoveCommand : ICommand
 
     public void Execute()
     {
-        _previous = _players.GetPosition(_playerId);
+        _previous = _facade.GetPosition(_playerId);
         _hasPrevious = true;
-        Result = _players.UpdatePosition(_playerId, _targetX, _targetY);
+        Result = _facade.MovePlayer(_playerId, _targetX, _targetY);
     }
 
     public void Undo()
     {
         if (!_hasPrevious) return;
-        Result = _players.UpdatePosition(_playerId, _previous.X, _previous.Y);
+        Result = _facade.MovePlayer(_playerId, _previous.X, _previous.Y);
     }
 }
