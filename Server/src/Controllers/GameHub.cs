@@ -1,6 +1,8 @@
 using Bomberman.Server.src.Interfaces;
 using Bomberman.Server.src.Patterns.Singleton;
 using Microsoft.AspNetCore.SignalR;
+using Bomberman.Server.src.Models;
+using Bomberman.Server.src.Patterns.Command;
 
 namespace Bomberman.Server.src.Controllers;
 
@@ -11,43 +13,47 @@ public sealed class GameHub : Hub
     private readonly GameManager _gameManager = GameManager.Instance;
     private readonly ILogger<GameHub> _logger;
 
+    private readonly CommandInvoker _invoker;
+
     public GameHub(
         IPlayerService playerService,
         IBombService bombService,
+        CommandInvoker invoker,
         ILogger<GameHub> logger)
     {
         _playerService = playerService;
         _bombService = bombService;
+        _invoker = invoker;
         _logger = logger;
     }
 
     public async Task Move(int x, int y)
     {
         var playerId = Context.ConnectionId;
-
-        var position = _playerService.UpdatePosition(playerId, x, y);
-
-        await Clients.Caller.SendAsync(
-            "Position", position.X, position.Y);
-
-        await Clients.Others.SendAsync(
-            "OtherPlayerPosition",
-            playerId,
-            position.X,
-            position.Y);
-
-        await Clients.Caller.SendAsync(
-            "PlayerHealth",
-            _playerService.GetPlayerHealth(playerId));
+        var command = new MoveCommand(_playerService, playerId, x, y);
+        _invoker.Run(playerId, command);
+        await SendPositionAsync(playerId, command.Result);
     }
 
     public Task PlaceBomb()
     {
-        string connectionId = Context.ConnectionId;
-
-        _ = RunBombSafelyAsync(connectionId);
-
+        var playerId = Context.ConnectionId;
+        _invoker.Run(playerId, new PlaceBombCommand(_bombService, playerId, _logger));
         return Task.CompletedTask;
+    }
+
+    public async Task Undo()
+    {
+        var playerId = Context.ConnectionId;
+        if (_invoker.UndoLast(playerId))
+            await SendPositionAsync(playerId, _playerService.GetPosition(playerId));
+    }
+
+    private async Task SendPositionAsync(string playerId, PlayerPosition position)
+    {
+        await Clients.Caller.SendAsync("Position", position.X, position.Y);
+        await Clients.Others.SendAsync("OtherPlayerPosition", playerId, position.X, position.Y);
+        await Clients.Caller.SendAsync("PlayerHealth", _playerService.GetPlayerHealth(playerId));
     }
 
     private async Task RunBombSafelyAsync(string connectionId)
@@ -111,6 +117,7 @@ public sealed class GameHub : Hub
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         var playerId = Context.ConnectionId;
+        _invoker.Clear(playerId);
 
         await Clients.Others.SendAsync("PlayerLeft", playerId);
 

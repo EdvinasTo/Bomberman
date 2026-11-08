@@ -7,8 +7,11 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import bomberman.observer.*;
+import bomberman.sound.GameEvent;
+import java.util.concurrent.CopyOnWriteArrayList;
 
-public class GameState {
+public class GameState implements IGameSubject {
     private int playerX = 100;
     private int playerY = 100;
     private volatile int playerHealth = 3;
@@ -27,6 +30,8 @@ public class GameState {
 
     private final Map<String, BlockView> blocks =
             new ConcurrentHashMap<>();
+
+    private final List<IGameObserver> observers = new CopyOnWriteArrayList<>();
 
     public GameState() {
         // Indestructible border blocks.
@@ -75,6 +80,7 @@ public class GameState {
 
     public void removeBlock(int x, int y) {
         blocks.remove(key(x, y));
+        notifyObservers(GameEvent.BLOCK_DESTROYED);
     }
 
     public synchronized int getPlayerX() {
@@ -91,11 +97,12 @@ public class GameState {
 
     public void setPlayerHealth(int health) {
         playerHealth = Math.max(0, Math.min(3, health));
+        notifyObservers(GameEvent.PLAYER_MOVED);
     }
 
-    public synchronized void setPlayerPosition(int x, int y) {
-        playerX = x;
-        playerY = y;
+    public void setPlayerPosition(int x, int y) {
+        synchronized (this) { playerX = x; playerY = y; }
+        notifyObservers(GameEvent.PLAYER_MOVED);
     }
 
     // Remote player state.
@@ -104,16 +111,15 @@ public class GameState {
     }
 
     public void updateOtherPlayer(String id, int x, int y) {
-        if (id == null || id.isBlank()) {
-            return;
-        }
-
+        if (id == null || id.isBlank()) { return; }
         otherPlayers.put(id, new Point(x, y));
+        notifyObservers(GameEvent.OTHER_PLAYER_CHANGED);
     }
 
     public void removeOtherPlayer(String id) {
         if (id != null) {
             otherPlayers.remove(id);
+            notifyObservers(GameEvent.OTHER_PLAYER_CHANGED);
         }
     }
 
@@ -123,6 +129,7 @@ public class GameState {
 
     public void addBomb(int x, int y, int radius, String ownerId) {
         bombs.add(new Bomb(x, y, radius, ownerId));
+        notifyObservers(GameEvent.BOMB_PLACED);
     }
 
     public void removeBomb(int x, int y) {
@@ -131,6 +138,7 @@ public class GameState {
                     bomb.isAt(x, y)
                     || bomb.isAt(x - 15, y - 15));
         }
+        notifyObservers(GameEvent.BOMB_REMOVED);
     }
 
     public List<Explosion> getExplosions() {
@@ -140,14 +148,13 @@ public class GameState {
     public void addExplosion(int x, int y, int radius) {
         // Render a cross using 30px cells.
         int step = 30;
-
         for (int offset = -radius; offset <= radius; offset += step) {
             explosions.add(new Explosion(x + offset, y));
-
             if (offset != 0) {
                 explosions.add(new Explosion(x, y + offset));
             }
         }
+        notifyObservers(GameEvent.EXPLOSION);
     }
 
     public void removeExplosion(int x, int y, int radius) {
@@ -158,6 +165,7 @@ public class GameState {
                     || (explosion.getX() == x
                             && Math.abs(explosion.getY() - y) <= radius));
         }
+        notifyObservers(GameEvent.EXPLOSION_ENDED);
     }
 
     public Map<String, EnemyView> getEnemies() {
@@ -165,35 +173,30 @@ public class GameState {
     }
 
     public void updateEnemy(String id, int x, int y, int health) {
-        if (id == null || id.isBlank()) {
-            return;
-        }
+        if (id == null || id.isBlank()) return;
 
         if (health <= 0) {
             enemies.remove(id);
+            notifyObservers(GameEvent.ENEMY_CHANGED);
             return;
         }
 
         enemies.compute(id, (key, enemy) -> {
-            if (enemy == null) {
-                return new EnemyView(id, x, y, health);
-            }
-
+            if (enemy == null) return new EnemyView(id, x, y, health);
             enemy.setPosition(x, y);
             enemy.setHealth(health);
             return enemy;
         });
+        notifyObservers(GameEvent.ENEMY_CHANGED);
     }
 
     public void updateEnemyPosition(String id, int x, int y) {
-        if (id == null || id.isBlank()) {
-            return;
-        }
-
+        if (id == null || id.isBlank()) return;
         enemies.computeIfPresent(id, (key, enemy) -> {
             enemy.setPosition(x, y);
             return enemy;
         });
+        notifyObservers(GameEvent.ENEMY_CHANGED);
     }
 
     public void updateEnemyHealth(String id, int health) {
@@ -205,11 +208,22 @@ public class GameState {
             enemy.setHealth(health);
             return health <= 0 ? null : enemy;
         });
+        notifyObservers(GameEvent.ENEMY_CHANGED);
     }
 
     public void removeEnemy(String id) {
         if (id != null) {
             enemies.remove(id);
+            notifyObservers(GameEvent.ENEMY_CHANGED);
         }
+    }
+
+    @Override
+    public void subscribe(IGameObserver o)   { if (o != null) observers.add(o); }
+    @Override
+    public void unsubscribe(IGameObserver o) { observers.remove(o); }
+    @Override
+    public void notifyObservers(GameEvent event) {
+        for (IGameObserver o : observers) o.onGameEvent(event);
     }
 }

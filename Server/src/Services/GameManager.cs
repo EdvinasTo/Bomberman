@@ -4,10 +4,11 @@ using Bomberman.Server.Blocks;
 using Bomberman.Server.Blocks.Damage;
 using Bomberman.Server.src.Models;
 using Bomberman.Server.src.Patterns.Strategy;
+using Bomberman.Server.src.Patterns.Observer;
 
 namespace Bomberman.Server.src.Patterns.Singleton;
 
-public sealed class GameManager
+public sealed class GameManager : IGameSubject
 {
     private static volatile GameManager? instance;
     private static readonly object syncRoot = new();
@@ -17,6 +18,8 @@ public sealed class GameManager
     private readonly ConcurrentDictionary<string, byte> _playersWithActiveBombs = new();
     private readonly ConcurrentDictionary<(int X, int Y), Block> _blocks = new();
     private readonly ConcurrentDictionary<string, Enemy> _enemies = new();
+
+    private readonly ConcurrentDictionary<IGameObserver, byte> _observers = new(); // observers
 
     private int _roundNumber;
 
@@ -220,6 +223,7 @@ public sealed class GameManager
                 _blocks.TryRemove(pair.Key, out _))
             {
                 destroyed.Add(pair.Key);
+                notifyObservers(new GameEvent(GameEventType.BlockDestroyed, X: pair.Key.X, Y: pair.Key.Y));
             }
         }
 
@@ -235,13 +239,27 @@ public sealed class GameManager
     public bool TryGetEnemy(string id, out Enemy? enemy) =>
         _enemies.TryGetValue(id, out enemy);
 
-    public bool RemoveEnemy(string id) =>
-        _enemies.TryRemove(id, out _);
+    public bool RemoveEnemy(string id)
+    {
+        bool removed = _enemies.TryRemove(id, out _);
+        if (removed) notifyObservers(new GameEvent(GameEventType.EnemyRemoved, id));
+        return removed;
+    }
 
     public void RemovePlayer(string connectionId)
     {
         _players.TryRemove(connectionId, out _);
         _playerPositions.TryRemove(connectionId, out _);
         _playersWithActiveBombs.TryRemove(connectionId, out _);
+        notifyObservers(new GameEvent(GameEventType.PlayerLeft, connectionId));
+    }
+
+    public void subscribe(IGameObserver o)   => _observers.TryAdd(o, 0);
+    public void unsubscribe(IGameObserver o) => _observers.TryRemove(o, out _);
+
+    public void notifyObservers(GameEvent e)
+    {
+        foreach (var o in _observers.Keys)
+            o.OnGameEvent(e); // _ =
     }
 }

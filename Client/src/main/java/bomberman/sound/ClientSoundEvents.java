@@ -1,5 +1,7 @@
 package bomberman.sound;
 
+import bomberman.observer.IGameObserver;
+
 import javax.sound.sampled.LineUnavailableException;
 import javax.sound.sampled.UnsupportedAudioFileException;
 import java.io.IOException;
@@ -8,7 +10,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 
-public final class ClientSoundEvents implements AutoCloseable {
+public final class ClientSoundEvents implements AutoCloseable, IGameObserver {
     private final Map<GameEvent, IGameSound> sounds = new EnumMap<>(GameEvent.class);
     private boolean closed;
 
@@ -24,6 +26,7 @@ public final class ClientSoundEvents implements AutoCloseable {
         }
     }
 
+    @Override
     public synchronized void onGameEvent(GameEvent event) {
         IGameSound sound = sounds.get(Objects.requireNonNull(event, "event"));
         if (!closed && sound != null) {
