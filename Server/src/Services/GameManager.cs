@@ -1,6 +1,7 @@
 
 using System.Collections.Concurrent;
 using Bomberman.Server.Blocks;
+using Bomberman.Server.src.Builder;
 using Bomberman.Server.Blocks.Damage;
 using Bomberman.Server.src.Models;
 using Bomberman.Server.src.Patterns.Strategy;
@@ -16,7 +17,10 @@ public sealed class GameManager : IGameSubject
     private readonly ConcurrentDictionary<string, Player> _players = new();
     private readonly ConcurrentDictionary<string, PlayerPosition> _playerPositions = new();
     private readonly ConcurrentDictionary<string, byte> _playersWithActiveBombs = new();
-    private readonly ConcurrentDictionary<(int X, int Y), Block> _blocks = new();
+    private Arena _arena = null!;
+    private ConcurrentDictionary<(int X, int Y), Block> _blocks = null!;
+    private ArenaDifficulty _difficulty = ArenaDifficulty.Easy;
+    private readonly ConcurrentDictionary<string, int> _playerSlots = new();
     private readonly ConcurrentDictionary<string, Enemy> _enemies = new();
 
     private readonly ConcurrentDictionary<IGameObserver, byte> _observers = new(); // observers
@@ -29,37 +33,49 @@ public sealed class GameManager : IGameSubject
 
     private GameManager()
     {
-        // Indestructible border blocks.
-        for (int x = 0; x <= 600; x += BlockSize)
-        {
-            _blocks[(x, 0)] = new IndestructibleBlock();
-            _blocks[(x, 420)] = new IndestructibleBlock();
-        }
+        ConfigureArena(ArenaDifficulty.Easy);
+    }
 
-        for (int y = 60; y <= 360; y += BlockSize)
-        {
-            _blocks[(0, y)] = new IndestructibleBlock();
-            _blocks[(600, y)] = new IndestructibleBlock();
-        }
+    public ArenaDifficulty Difficulty => _difficulty;
+    public int ArenaWidth => _arena.Width;
+    public int ArenaHeight => _arena.Height;
+    public PlayerPosition Player1Spawn => _arena.Player1Spawn;
+    public PlayerPosition Player2Spawn => _arena.Player2Spawn;
+    public string ArenaTiles => _arena.ExportTiles();
 
-        // Internal indestructible obstacle.
-        _blocks[(300, 180)] = new IndestructibleBlock();
+    // Called once at server startup, before clients join.
+    public void ConfigureArena(ArenaDifficulty difficulty)
+    {
+        lock (syncRoot)
+        {
+            if (!_playerPositions.IsEmpty || !_playerSlots.IsEmpty)
+                throw new InvalidOperationException("Cannot replace an arena while players are connected.");
 
-        // Destructible blocks.
-        foreach (var position in new[]
-        {
-            (180, 120),
-            (240, 120),
-            (360, 120),
-            (420, 180),
-            (180, 240),
-            (300, 300),
-            (420, 300)
-        })
-        {
-            _blocks[position] =
-                new DestructibleBlock(new OneHitDamage());
+            IArenaBuilder builder = difficulty == ArenaDifficulty.Hard
+                ? new HardArenaBuilder()
+                : new EasyArenaBuilder();
+            _arena = new ArenaDirector().Construct(builder);
+            _blocks = _arena.Blocks;
+            _difficulty = difficulty;
         }
+    }
+
+    public bool TryReservePlayerSlot(string connectionId)
+    {
+        lock (syncRoot)
+        {
+            if (_playerSlots.ContainsKey(connectionId)) return true;
+            if (_playerSlots.Count >= 2) return false;
+            _playerSlots[connectionId] = _playerSlots.Values.Contains(1) ? 2 : 1;
+            return true;
+        }
+    }
+
+    public int GetPlayerSlot(string connectionId)
+    {
+        if (_playerSlots.TryGetValue(connectionId, out int slot))
+            return slot;
+        throw new InvalidOperationException("The player must reserve a slot before joining.");
     }
 
     public static GameManager Instance
@@ -98,8 +114,8 @@ public sealed class GameManager : IGameSubject
 
         var current = GetPlayerPosition(connectionId);
 
-        x = Math.Clamp(x, 0, 610);
-        y = Math.Clamp(y, 0, 450);
+        x = Math.Clamp(x, 0, _arena.Width * BlockSize - PlayerSize);
+        y = Math.Clamp(y, 0, _arena.Height * BlockSize - PlayerSize);
 
         if (CanOccupy(x, y))
         {
@@ -118,7 +134,9 @@ public sealed class GameManager : IGameSubject
 
         return _playerPositions.GetOrAdd(
             connectionId,
-            _ => new PlayerPosition(100, 100));
+            _ => GetPlayerSlot(connectionId) == 1
+                ? _arena.Player1Spawn
+                : _arena.Player2Spawn);
     }
 
     public IReadOnlyCollection<KeyValuePair<string, PlayerPosition>>
@@ -168,25 +186,8 @@ public sealed class GameManager : IGameSubject
     public void FinishPlayerBomb(string connectionId) =>
         _playersWithActiveBombs.TryRemove(connectionId, out _);
 
-    public bool CanOccupy(int x, int y)
-    {
-        foreach (var pair in _blocks)
-        {
-            int bx = pair.Key.X;
-            int by = pair.Key.Y;
-
-            bool overlaps =
-                x < bx + BlockSize &&
-                x + PlayerSize > bx &&
-                y < by + BlockSize &&
-                y + PlayerSize > by;
-
-            if (overlaps)
-                return false;
-        }
-
-        return true;
-    }
+    public bool CanOccupy(int x, int y) =>
+        _arena.IsWalkable(x, y, PlayerSize);
 
     public IReadOnlyCollection<(int X, int Y)> DestroyBlocksInBlast(
         int bombX, int bombY, int radius)
@@ -249,6 +250,7 @@ public sealed class GameManager : IGameSubject
     public void RemovePlayer(string connectionId)
     {
         _players.TryRemove(connectionId, out _);
+        _playerSlots.TryRemove(connectionId, out _);
         _playerPositions.TryRemove(connectionId, out _);
         _playersWithActiveBombs.TryRemove(connectionId, out _);
         notifyObservers(new GameEvent(GameEventType.PlayerLeft, connectionId));

@@ -50,18 +50,29 @@ public sealed class GameHub : Hub
     public override async Task OnConnectedAsync()
     {
         var playerId = Context.ConnectionId;
+        var manager = GameManager.Instance;
+        if (!manager.TryReservePlayerSlot(playerId))
+        {
+            await Clients.Caller.SendAsync("GameFull");
+            Context.Abort();
+            return;
+        }
         var position = _facade.GetPosition(playerId);
 
+        await Clients.Caller.SendAsync("ArenaSnapshot",
+            manager.Difficulty.ToString(), manager.ArenaWidth, manager.ArenaHeight,
+            manager.ArenaTiles);
+        await Clients.Caller.SendAsync("PlayerSlot", manager.GetPlayerSlot(playerId));
         await Clients.Caller.SendAsync("Position", position.X, position.Y);
 
         await Clients.Caller.SendAsync("PlayerHealth", _facade.GetHealth(playerId));
 
         foreach (var pair in _facade.GetOtherPlayers(playerId))
-            await Clients.Caller.SendAsync("OtherPlayerSpawned", pair.Key, pair.Value.X, pair.Value.Y);
+            await Clients.Caller.SendAsync("OtherPlayerSpawned", pair.Key, pair.Value.X, pair.Value.Y, manager.GetPlayerSlot(pair.Key));
         
 
         await Clients.Others.SendAsync(
-            "OtherPlayerSpawned", playerId, position.X, position.Y);
+            "OtherPlayerSpawned", playerId, position.X, position.Y, manager.GetPlayerSlot(playerId));
 
         foreach (var enemy in _facade.GetEnemies())
         {

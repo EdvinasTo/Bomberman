@@ -9,11 +9,18 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class GameState {
-    private int playerX = 100;
-    private int playerY = 100;
+    private int playerX = 80;
+    private int playerY = 80;
+    private volatile int localPlayerSlot = 1;
+    private volatile String arenaDifficulty = "Easy";
+    private volatile int arenaWidth = 11;
+    private volatile int arenaHeight = 9;
     private volatile int playerHealth = 3;
 
     private final Map<String, Point> otherPlayers =
+            new ConcurrentHashMap<>();
+
+    private final Map<String, Integer> otherPlayerSlots =
             new ConcurrentHashMap<>();
 
     private final List<Bomb> bombs =
@@ -29,40 +36,39 @@ public class GameState {
             new ConcurrentHashMap<>();
 
     public GameState() {
-        // Indestructible border blocks.
-        for (int x = 0; x <= 600; x += 60) {
-            blocks.put(key(x, 0), new BlockView(x, 0, false));
-            blocks.put(key(x, 420), new BlockView(x, 420, false));
+        // Arena blocks come from the authoritative server, not duplicated here.
+    }
+
+    public synchronized void applyArenaSnapshot(
+            String difficulty, int width, int height, String tiles) {
+        if (width <= 0 || height <= 0 || tiles == null || tiles.length() != width * height) {
+            throw new IllegalArgumentException("Invalid arena snapshot");
         }
-
-        for (int y = 60; y <= 360; y += 60) {
-            blocks.put(key(0, y), new BlockView(0, y, false));
-            blocks.put(key(600, y), new BlockView(600, y, false));
+        blocks.clear();
+        for (int row = 0; row < height; row++) {
+            for (int col = 0; col < width; col++) {
+                char symbol = tiles.charAt(row * width + col);
+                if (symbol == '#' || symbol == '+') {
+                    int x = col * 60;
+                    int y = row * 60;
+                    blocks.put(key(x, y), new BlockView(x, y, symbol == '+'));
+                } else if (symbol != '.') {
+                    throw new IllegalArgumentException("Unexpected arena tile: " + symbol);
+                }
+            }
         }
+        this.arenaWidth = width;
+        this.arenaHeight = height;
+        this.arenaDifficulty = difficulty;
+    }
 
-        // Internal indestructible obstacle.
-        blocks.put(
-                key(300, 180),
-                new BlockView(300, 180, false)
-        );
-
-        // Destructible blocks.
-        int[][] positions = {
-                {180, 120},
-                {240, 120},
-                {360, 120},
-                {420, 180},
-                {180, 240},
-                {300, 300},
-                {420, 300}
-        };
-
-        for (int[] position : positions) {
-            blocks.put(
-                    key(position[0], position[1]),
-                    new BlockView(position[0], position[1], true)
-            );
-        }
+    public int getArenaWidth() { return arenaWidth; }
+    public int getArenaHeight() { return arenaHeight; }
+    public String getArenaDifficulty() { return arenaDifficulty; }
+    public int getLocalPlayerSlot() { return localPlayerSlot; }
+    public void setLocalPlayerSlot(int slot) { localPlayerSlot = slot; }
+    public int getOtherPlayerSlot(String playerId) {
+        return otherPlayerSlots.getOrDefault(playerId, 2);
     }
 
     private static String key(int x, int y) {
@@ -111,9 +117,14 @@ public class GameState {
         otherPlayers.put(id, new Point(x, y));
     }
 
+    public void setOtherPlayerSlot(String id, int slot) {
+        if (id != null) otherPlayerSlots.put(id, slot);
+    }
+
     public void removeOtherPlayer(String id) {
         if (id != null) {
             otherPlayers.remove(id);
+            otherPlayerSlots.remove(id);
         }
     }
 

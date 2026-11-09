@@ -194,10 +194,41 @@ public sealed class EnemyService : BackgroundService
 
     public void SpawnEnemies()
     {
+        var occupiedSpawns = new List<(int X, int Y)>();
         foreach (var position in SpawnPositions)
         {
-            SpawnEnemy("Patrol", position.X, position.Y);
+            // Find a safe position in the selected arena; keep enemy spawns distinct.
+            var (x, y) = FindFreeSpawn(position.X, position.Y, occupiedSpawns);
+            SpawnEnemy("Patrol", x, y);
+            occupiedSpawns.Add((x, y));
         }
+    }
+
+    private (int X, int Y) FindFreeSpawn(
+        int requestedX, int requestedY, IReadOnlyCollection<(int X, int Y)> occupied)
+    {
+        bool IsSafe(int x, int y) =>
+            _gameManager.CanOccupy(x, y) &&
+            occupied.All(p => DistanceSquared(x, y, p.X, p.Y) >= 60 * 60) &&
+            DistanceSquared(x, y,
+                _gameManager.Player1Spawn.X, _gameManager.Player1Spawn.Y) >= 110 * 110 &&
+            DistanceSquared(x, y,
+                _gameManager.Player2Spawn.X, _gameManager.Player2Spawn.Y) >= 110 * 110;
+
+        if (IsSafe(requestedX, requestedY))
+            return (requestedX, requestedY);
+
+        var candidates = new List<(int X, int Y)>();
+        for (int y = 60; y < _gameManager.ArenaHeight * 60 - 60; y += 60)
+        for (int x = 60; x < _gameManager.ArenaWidth * 60 - 60; x += 60)
+            candidates.Add((x + 10, y + 10));
+
+        foreach (var candidate in candidates.OrderBy(p =>
+                     DistanceSquared(p.X, p.Y, requestedX, requestedY)))
+            if (IsSafe(candidate.X, candidate.Y))
+                return candidate;
+
+        throw new InvalidOperationException("Arena has no free enemy spawn cell.");
     }
 
     private static double DistanceSquared(

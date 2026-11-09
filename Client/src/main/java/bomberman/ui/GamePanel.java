@@ -7,6 +7,7 @@ import bomberman.model.EnemyView;
 import bomberman.model.Explosion;
 import bomberman.model.GameState;
 import bomberman.network.NetworkManager;
+import bomberman.ui.visual.*;
 
 import javax.swing.*;
 import java.awt.*;
@@ -17,6 +18,13 @@ public class GamePanel extends JPanel {
     private final GameState gameState;
     private final NetworkManager networkManager;
     private final Timer movementTimer;
+
+    private IVisualFactory visualFactory;
+    private PlayerVisual playerVisual;
+    private BombVisual bombVisual;
+    private BlockVisual blockVisual;
+    private ExplosionVisual explosionVisual;
+    private boolean neonTheme = false;
 
     private int moveDx;
     private int moveDy;
@@ -30,12 +38,27 @@ public class GamePanel extends JPanel {
         this.gameState = gameState;
         this.networkManager = networkManager;
 
-        setPreferredSize(new Dimension(640, 480));
+        setPreferredSize(new Dimension(660, 540));
         setBackground(Color.WHITE);
         setFocusable(true);
 
         movementTimer = new Timer(100, e -> sendMovement());
+        setVisualFactory(new StandardVisualFactory());
         setupKeyBindings();
+    }
+
+    // Abstract Factory chooses a consistent family of graphics products.
+    // Decorator adds 3 independent layers around the factory-created player.
+    public final void setVisualFactory(IVisualFactory factory) {
+        this.visualFactory = java.util.Objects.requireNonNull(factory, "factory");
+        playerVisual = new PlayerCoordinatesDecorator(
+                new PlayerNameDecorator(
+                        new PlayerFrameDecorator(factory.createPlayerVisual())));
+        bombVisual = factory.createBombVisual();
+        blockVisual = factory.createBlockVisual();
+        explosionVisual = factory.createExplosionVisual();
+        neonTheme = factory instanceof NeonVisualFactory;
+        repaint();
     }
 
     private void setupKeyBindings() {
@@ -50,6 +73,17 @@ public class GamePanel extends JPanel {
             @Override
             public void actionPerformed(ActionEvent e) {
                 networkManager.sendPlaceBomb();
+            }
+        });
+
+        // T switches the Abstract Factory graphics family at runtime.
+        getInputMap(WHEN_IN_FOCUSED_WINDOW)
+                .put(KeyStroke.getKeyStroke("pressed T"), "CHANGE_THEME");
+        getActionMap().put("CHANGE_THEME", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                setVisualFactory(neonTheme
+                        ? new StandardVisualFactory()
+                        : new NeonVisualFactory());
             }
         });
 
@@ -132,53 +166,35 @@ public class GamePanel extends JPanel {
         Graphics2D g2 = (Graphics2D) g.create();
 
         try {
-            // Blocks.
-            for (BlockView block : gameState.getBlocks().values()) {
-                g2.setColor(block.isDestructible()
-                        ? new Color(160, 100, 45)
-                        : new Color(90, 95, 105));
-
-                g2.fillRect(block.getX(), block.getY(), 60, 60);
-
-                if (block.isDestructible()) {
-                    g2.setColor(new Color(100, 55, 25));
-                    g2.drawLine(
-                            block.getX() + 8, block.getY() + 8,
-                            block.getX() + 52, block.getY() + 52);
-                    g2.drawLine(
-                            block.getX() + 52, block.getY() + 8,
-                            block.getX() + 8, block.getY() + 52);
-                } else {
-                    g2.setColor(new Color(55, 60, 70));
-                    g2.drawRect(
-                            block.getX() + 3, block.getY() + 3,
-                            54, 54);
+            // Draw all floor cells; the Builder uses null for walkable cells.
+            for (int row = 0; row < gameState.getArenaHeight(); row++) {
+                for (int col = 0; col < gameState.getArenaWidth(); col++) {
+                    blockVisual.drawFloor(g2, col * 60, row * 60);
                 }
             }
 
-            // Bombs.
-            g2.setColor(Color.BLACK);
+            // Render the arena blocks selected by the server-side Builder.
+            for (BlockView block : gameState.getBlocks().values()) {
+                if (block.isDestructible()) {
+                    blockVisual.drawDestructible(g2, block.getX(), block.getY());
+                } else {
+                    blockVisual.drawIndestructible(g2, block.getX(), block.getY());
+                }
+            }
+
             synchronized (gameState.getBombs()) {
                 for (Bomb bomb : gameState.getBombs()) {
-                    g2.fillOval(
-                            bomb.getX() - 15,
-                            bomb.getY() - 15,
-                            30, 30);
+                    bombVisual.draw(g2, bomb);
                 }
             }
 
-            // Explosions.
-            g2.setColor(Color.RED);
             synchronized (gameState.getExplosions()) {
                 for (Explosion explosion : gameState.getExplosions()) {
-                    g2.fillRect(
-                            explosion.getX() - 15,
-                            explosion.getY() - 15,
-                            30, 30);
+                    explosionVisual.draw(g2, explosion);
                 }
             }
 
-            // Enemies and their health.
+            // Enemy rendering is unchanged; enemies are not factory products.
             for (EnemyView enemy : gameState.getEnemies().values()) {
                 int x = enemy.getX();
                 int y = enemy.getY();
@@ -187,39 +203,22 @@ public class GamePanel extends JPanel {
                 g2.fillOval(x, y, 30, 30);
 
                 g2.setColor(Color.DARK_GRAY);
-                g2.setFont(new Font(
-                        Font.SANS_SERIF, Font.PLAIN, 11));
-                g2.drawString(
-                        "HP " + enemy.getHealth(),
-                        x, Math.max(55, y - 4));
+                g2.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
+                g2.drawString("HP " + enemy.getHealth(), x, Math.max(55, y - 4));
             }
 
-            // Other players.
+            // Both players use the same decorator chain, but distinct player slots.
             for (Map.Entry<String, Point> entry
                     : gameState.getOtherPlayers().entrySet()) {
-
                 Point position = entry.getValue();
-                int x = position.x;
-                int y = position.y;
-
-                g2.setColor(new Color(235, 135, 45));
-                g2.fillRect(x, y, 30, 30);
-
-                g2.setColor(Color.BLACK);
-                g2.setFont(new Font(
-                        Font.SANS_SERIF, Font.BOLD, 10));
-                g2.drawString(
-                        "P2",
-                        x + 7,
-                        y - 4);
+                int slot = gameState.getOtherPlayerSlot(entry.getKey());
+                playerVisual.draw(g2, position.x, position.y, slot);
             }
 
-            // Local player.
-            int playerX = gameState.getPlayerX();
-            int playerY = gameState.getPlayerY();
-
-            g2.setColor(new Color(40, 121, 192));
-            g2.fillRect(playerX, playerY, 30, 30);
+            playerVisual.draw(g2,
+                    gameState.getPlayerX(),
+                    gameState.getPlayerY(),
+                    gameState.getLocalPlayerSlot());
 
             // Health HUD.
             int health = Math.max(
@@ -262,6 +261,24 @@ public class GamePanel extends JPanel {
             g2.setFont(new Font(
                     Font.SANS_SERIF, Font.BOLD, 12));
             g2.drawString(health + " / " + maxHealth, 82, 41);
+
+            g2.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
+            g2.setColor(neonTheme ? new Color(255, 230, 100) : Color.WHITE);
+            g2.drawString("Arena: " + gameState.getArenaDifficulty()
+                    + "   Theme: " + (neonTheme ? "Neon" : "Standard"), 210, 24);
+
+            // A visible connection indicator makes startup failures easier to diagnose.
+            if (!networkManager.isConnected()) {
+                g2.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
+                g2.setColor(new Color(40, 40, 40, 225));
+                g2.fillRoundRect(112, getHeight() / 2 - 22,
+                        getWidth() - 224, 44, 12, 12);
+                g2.setColor(Color.WHITE);
+                String status = networkManager.getConnectionStatus();
+                FontMetrics metrics = g2.getFontMetrics();
+                g2.drawString(status, (getWidth() - metrics.stringWidth(status)) / 2,
+                        getHeight() / 2 + 5);
+            }
 
         } finally {
             g2.dispose();

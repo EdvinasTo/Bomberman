@@ -36,3 +36,5 @@ build/
 
 ### Mac OS ###
 .DS_Store
+# Standalone javac builds (no Maven)
+out/
