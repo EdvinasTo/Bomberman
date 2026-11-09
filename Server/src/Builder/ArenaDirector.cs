@@ -1,6 +1,5 @@
 namespace Bomberman.Server.src.Builder;
 
-// The Director determines the order, not the concrete obstacle positions.
 public sealed class ArenaDirector
 {
     public Arena Construct(IArenaBuilder builder)

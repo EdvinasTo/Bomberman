@@ -4,7 +4,6 @@ using Bomberman.Server.src.Models;
 
 namespace Bomberman.Server.src.Builder;
 
-// The constructed product. Positions are world pixels in 60px cells.
 public sealed class Arena
 {
     public const int TileSize = 60;

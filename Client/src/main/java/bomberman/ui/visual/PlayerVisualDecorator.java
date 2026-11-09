@@ -3,7 +3,7 @@ package bomberman.ui.visual;
 import java.awt.Graphics2D;
 import java.util.Objects;
 
-// Both is-a PlayerVisual and has-a PlayerVisual (wrapped association).
+
 public abstract class PlayerVisualDecorator extends PlayerVisual {
     protected final PlayerVisual wrapped;
 

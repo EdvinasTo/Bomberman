@@ -17,12 +17,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
-/**
- * Small, dependency-free transport for ASP.NET Core SignalR's JSON hub protocol.
- * Requires only JDK 17 (java.net.http.WebSocket). Uses WebSocket-only transport
- * without the optional /negotiate request. This is not a general SignalR client:
- * it intentionally supports only the messages required by the Bomberman game.
- */
+
 public final class SignalRWebSocket implements WebSocket.Listener, AutoCloseable {
     private static final char SEPARATOR = '\u001e';
     private final URI endpoint;

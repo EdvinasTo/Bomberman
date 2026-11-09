@@ -5,10 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Minimal JSON reader for the SignalR JSON hub protocol.
- * This client only sends fixed method names and integer arguments; no JSON library is required.
- */
+
 final class SignalRJson {
     private final String source;
     private int index;

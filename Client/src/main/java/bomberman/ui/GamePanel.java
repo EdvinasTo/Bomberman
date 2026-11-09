@@ -194,7 +194,7 @@ public class GamePanel extends JPanel {
                 }
             }
 
-            // Enemy rendering is unchanged; enemies are not factory products.
+
             for (EnemyView enemy : gameState.getEnemies().values()) {
                 int x = enemy.getX();
                 int y = enemy.getY();
